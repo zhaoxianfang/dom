@@ -1,0 +1,43 @@
+{
+  "name": "zxf/dom",
+  "description": "一个功能强大、易于使用的 PHP DOM 操作库，提供简洁的 API 来解析、查询和操作 HTML/XML 文档",
+  "type": "library",
+  "keywords": [
+    "utils", "util", "dom", "spider", "html", "html5", "xml", "xpath", "curl", "css", "html", "web-scraper", "html-parser", "xml-parser", "php", "http"],
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "zxf",
+      "homepage": "https://yoc.cn"
+    }
+  ],
+  "require": {
+    "php": ">=8.2"
+  },
+  "require-dev": {
+  },
+  "autoload": {
+    "psr-4": {
+      "zxf\\Dom\\": "src/"
+    },
+    "files": [
+      "src/helpers.php"
+    ]
+  },
+  "config": {
+    "sort-packages": true,
+    "optimize-autoloader": true
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true,
+  "funding": [
+    {
+      "type": "custom",
+      "url": "https://yoc.cn"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/zhaoxianfang/dom/issues",
+    "source": "https://github.com/zhaoxianfang/dom"
+  }
+}

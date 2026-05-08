@@ -1,0 +1,33 @@
+/node_modules
+/public/hot
+/public/storage
+/storage/*.key
+/vendor
+.env
+.env.backup
+.phpunit.result.cache
+docker-compose.override.yml
+Homestead.json
+Homestead.yaml
+npm-debug.log
+yarn-error.log
+/.idea
+/.vscode
+
+# 自定义忽略文件
+!.gitignore
+.DS_Store
+*.log
+/.git
+
+# Office 缓存文件
+~'$'*.docx
+~'$'*.ppt
+~'$'*.pptx
+~'$'*.xls
+
+# 忽略所有 . 开头的目录
+.*/
+# 忽略所有 . 开头的文件
+.*
+!.gitignore
