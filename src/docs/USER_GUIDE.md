@@ -901,6 +901,39 @@ $dates = $doc->findWithFallback([
     ['selector' => '.date'],
     ['selector' => '/\d{4}-\d{2}-\d{2}/', 'type' => 'regex']
 ]);
+
+// 提取表格数据（table 类型）
+$tableData = $doc->findWithFallback([
+    ['selector' => 'table.data-table', 'type' => 'table'],
+    ['selector' => 'table.old-table', 'type' => 'table'],
+]);
+// 返回结构化表格数据：['thead' => [...], 'tbody' => [...]]
+
+// 提取列表数据（list 类型）
+$listData = $doc->findWithFallback([
+    ['selector' => 'ul.product-list', 'type' => 'list'],
+    ['selector' => 'ol.old-list', 'type' => 'list'],
+]);
+
+// 提取表单数据（form 类型）
+$formData = $doc->findWithFallback([
+    ['selector' => 'form#login', 'type' => 'form'],
+]);
+
+// 提取链接数据（link 类型）
+$links = $doc->findWithFallback([
+    ['selector' => 'a.external', 'type' => 'link'],
+]);
+
+// 提取图片数据（image 类型）
+$images = $doc->findWithFallback([
+    ['selector' => 'img.thumbnail', 'type' => 'image'],
+]);
+
+// 提取文本内容（text 类型）
+$texts = $doc->findWithFallback([
+    ['selector' => 'p.description', 'type' => 'text'],
+]);
 ```
 
 ### 智能选择器类型检测
@@ -925,6 +958,51 @@ $isRelative = Query::isXPathRelative('//div[@class="item"]');   // true
 ## 选择器数组回退查找
 
 选择器数组回退查找是一项强大的功能，允许您传入多个选择器，按顺序尝试，找到第一个非空结果即返回。这为处理不同结构的网页提供了极大的灵活性。
+
+### 支持的选择器类型
+
+| 类型  | 说明      | 返回值类型           | 示例                                               |
+|------|---------|------------------|--------------------------------------------------|
+| css  | CSS 选择器 | `Element[]`      | `['selector' => 'div.item']`                       |
+| xpath | XPath   | `Element[]`      | `['selector' => '//div[@class="item"]', 'type' => 'xpath']` |
+| regex | 正则表达式  | `Element[]` 或 `string[]` | `['selector' => '/\d+/', 'type' => 'regex']`        |
+| table | 表格数据   | `array[]`        | `['selector' => 'table.data', 'type' => 'table']`   |
+| list  | 列表数据   | `array[]`        | `['selector' => 'ul.products', 'type' => 'list']`   |
+| form  | 表单数据   | `array`          | `['selector' => 'form#login', 'type' => 'form']`    |
+| link  | 链接数据   | `array[]`        | `['selector' => 'a.external', 'type' => 'link']`    |
+| image | 图片数据   | `array[]`        | `['selector' => 'img.thumb', 'type' => 'image']`    |
+| text  | 文本内容   | `string[]`       | `['selector' => 'p.desc', 'type' => 'text']`        |
+| json  | JSON 数据 | `array`          | `['selector' => '', 'type' => 'json']`              |
+
+### 参数说明
+
+| 参数            | 类型     | 必需 | 说明                                                                     |
+|---------------|--------|----|------------------------------------------------------------------------|
+| selector      | string | 是  | 选择器表达式                                                                 |
+| type          | string | 否  | 选择器类型，默认 'css'                                                         |
+| attribute     | string | 否  | 仅 type='regex' 时使用，指定要匹配的属性名                                          |
+| extractMode   | string | 否  | 仅 type='regex' 时使用，提取模式：'elements'、'text'、'attr'、'match'                |
+| group         | int    | 否  | 仅 extractMode='match' 时使用，指定分组索引                                        |
+| location      | array  | 否  | 仅 type='regex' 时使用，提取多个分组并返回关联数组                                        |
+| extractOptions | array  | 否  | 提取选项，用于 table/list/text 类型                                             |
+
+### extractOptions 选项说明
+
+**table 类型选项：**
+- `headerRow` (int): 表头行索引，默认 0
+- `skipRows` (int): 跳过的行数，默认 0
+- `includeHeader` (bool): 是否包含表头，默认 true
+- `trimText` (bool): 是否修剪空白，默认 true
+- `removeEmpty` (bool): 是否移除空行，默认 true
+- `returnFormat` (string): 返回格式，'structured' / 'associative' / 'indexed'
+- `cellSelector` (string): 单元格选择器，默认 'td, th'
+- `rowSelector` (string): 行选择器，默认 'tr'
+- `tableIndex` (int|null): 指定表格索引，null 表示返回所有
+
+**list 类型选项：**
+- `recursive` (bool): 是否递归提取嵌套列表，默认 false
+- `trimText` (bool): 是否修剪空白，默认 true
+- `includeIndex` (bool): 是否包含索引，默认 false
 
 ### 重要：返回数据结构
 
@@ -986,7 +1064,100 @@ $dates = $doc->findWithFallback([
 ]);
 ```
 
-### 获取所有选择器结果
+### 提取表格数据（table 类型）
+
+```php
+// 从不同结构的表格中提取数据
+$html = '<div>
+    <table class="data-table">
+        <thead><tr><th>姓名</th><th>年龄</th></tr></thead>
+        <tbody><tr><td>张三</td><td>30</td></tr></tbody>
+    </table>
+    <table class="old-table">
+        <tr><td>姓名</td><td>年龄</td></tr>
+        <tr><td>李四</td><td>25</td></tr>
+    </table>
+</div>';
+$doc = new Document($html);
+
+// 优先使用新表格结构，回退到旧表格结构
+$results = $doc->findWithFallback([
+    ['selector' => 'table.data-table', 'type' => 'table'],
+    ['selector' => 'table.old-table', 'type' => 'table'],
+]);
+
+// 使用 extractOptions 自定义提取选项
+$results = $doc->findWithFallback([
+    [
+        'selector' => 'table.data-table',
+        'type' => 'table',
+        'extractOptions' => [
+            'returnFormat' => 'associative',
+            'includeHeader' => true,
+        ],
+    ],
+]);
+```
+
+### 提取列表数据（list 类型）
+
+```php
+// 提取列表数据
+$items = $doc->findWithFallback([
+    ['selector' => 'ul.product-list', 'type' => 'list'],
+    ['selector' => 'ol.old-product-list', 'type' => 'list'],
+]);
+
+// 带选项提取嵌套列表
+$items = $doc->findWithFallback([
+    [
+        'selector' => 'ul.category-menu',
+        'type' => 'list',
+        'extractOptions' => [
+            'recursive' => true,
+            'includeIndex' => true,
+        ],
+    ],
+]);
+```
+
+### 提取表单、链接、图片数据
+
+```php
+// 表单数据提取
+$formData = $doc->findWithFallback([
+    ['selector' => 'form#login', 'type' => 'form'],
+]);
+
+// 链接数据提取
+$links = $doc->findWithFallback([
+    ['selector' => 'a.external-link', 'type' => 'link'],
+]);
+
+// 图片数据提取
+$images = $doc->findWithFallback([
+    ['selector' => 'img.thumbnail', 'type' => 'image'],
+]);
+
+// 文本内容提取
+$texts = $doc->findWithFallback([
+    ['selector' => 'p.description', 'type' => 'text'],
+]);
+```
+
+### 混合使用不同的提取类型
+
+```php
+// 根据页面结构灵活选择提取方式
+$result = $doc->findWithFallback([
+    // 优先提取表格数据
+    ['selector' => 'table.products', 'type' => 'table'],
+    // 回退到提取列表数据
+    ['selector' => 'ul.products', 'type' => 'list'],
+    // 最后尝试提取链接
+    ['selector' => 'a.product', 'type' => 'link'],
+]);
+```
 
 ```php
 // 获取所有选择器的结果（即使有的返回空）
@@ -1219,5 +1390,192 @@ zxf/dom 是一个功能强大的 PHP DOM 操作库，提供了：
 
 ---
 
-*文档版本: 1.0*  
-*最后更新: 2026-01-07*
+*文档版本: 2.0*  
+*最后更新: 2026-05-14*
+
+---
+
+## 附录：完整 API 参数参考
+
+### A. 选择器类型常量（`zxf\Dom\Selectors\Query::TYPE_*`）
+
+| 常量 | 值 | 返回类型 | 说明 |
+|------|-----|---------|------|
+| `TYPE_CSS` | `'css'` | `Element[]` | CSS 选择器（默认） |
+| `TYPE_XPATH` | `'xpath'` | `Element[]` | XPath 表达式 |
+| `TYPE_REGEX` | `'regex'` | `Element[]` 或 `string[]` | 正则表达式 |
+| `TYPE_TABLE` | `'table'` | `array[]` | 表格数据提取 |
+| `TYPE_LIST` | `'list'` | `array[]` | 列表数据提取 |
+| `TYPE_FORM` | `'form'` | `array` | 表单数据提取 |
+| `TYPE_LINK` | `'link'` | `array[]` | 链接数据提取 |
+| `TYPE_IMAGE` | `'image'` | `array[]` | 图片数据提取 |
+| `TYPE_TEXT` | `'text'` | `string[]` | 文本内容提取 |
+| `TYPE_JSON` | `'json'` | `array` | JSON 数据解析 |
+
+### B. `extractTable()` 选项完整枚举
+
+| 参数 | 类型 | 默认值 | 所有可选值 | 说明 |
+|------|------|--------|-----------|------|
+| `selectorType` | `string` | `'auto'` | `'auto'` `'css'` `'xpath'` `'regex'` | 选择器类型自动检测或手动指定 |
+| `headerRow` | `int` | `0` | `0,1,2,...` | 表头行索引（0-based） |
+| `skipRows` | `int` | `0` | `0,1,2,...` | 跳过表格开头的行数 |
+| `includeHeader` | `bool` | `true` | `true` `false` | 是否提取表头数据 |
+| `includeHeaderAsFirstRow` | `bool` | `false` | `true` `false` | 是否将表头作为第一行 |
+| `trimText` | `bool` | `true` | `true` `false` | 是否修剪单元格空白 |
+| `removeEmpty` | `bool` | `true` | `true` `false` | 是否移除空行 |
+| `cellSelector` | `string` | `'td, th'` | 任意CSS选择器 | 单元格选择器 |
+| `rowSelector` | `string` | `'tr'` | 任意CSS选择器 | 行选择器 |
+| `returnFormat` | `string` | `'structured'` | `'structured'` `'associative'` `'indexed'` `'both'` | 返回格式 |
+| `preserveStructure` | `bool` | `true` | `true` `false` | 是否保留 thead/tbody/tfoot |
+| `returnAllTables` | `bool` | `true` | `true` `false` | 是否返回所有匹配表格 |
+| `tableIndex` | `int|null` | `null` | `null,0,1,2,...` | 指定返回第几个表格 |
+
+**`returnFormat` 返回格式**：
+- `'structured'`: `[['thead'=>[...], 'tbody'=>[[...],...]]]`
+- `'associative'`: `[['姓名'=>'张三','年龄'=>'30'],...]`
+- `'indexed'`: `[['张三','30'],...]`
+- `'both'`: `['headers'=>[...], 'rows'=>[[...],...]]`
+
+### C. `extractList()` 选项完整枚举
+
+| 参数 | 类型 | 默认值 | 可选值 | 说明 |
+|------|------|--------|-------|------|
+| `recursive` | `bool` | `false` | `true` `false` | 递归提取嵌套列表 |
+| `trimText` | `bool` | `true` | `true` `false` | 修剪文本空白 |
+| `includeIndex` | `bool` | `false` | `true` `false` | 包含序号索引 |
+
+### D. `queryMatrix()` 选项完整枚举
+
+| 参数 | 类型 | 默认值 | 可选值 | 说明 |
+|------|------|--------|-------|------|
+| `rowSelector` | `string|null` | `null` | null 或任意CSS选择器 | 行选择器，null=直接子元素 |
+| `cellSelector` | `string|null` | `null` | null 或任意CSS选择器 | 单元格选择器，null=直接子元素 |
+| `trimText` | `bool` | `true` | `true` `false` | 修剪文本空白 |
+| `removeEmpty` | `bool` | `true` | `true` `false` | 移除空行/空单元格 |
+| `selectorType` | `string` | `'auto'` | `'auto'` `'css'` `'xpath'` `'regex'` | 选择器类型 |
+
+### E. `findWithFallback()` 选择器配置完整枚举
+
+| 参数 | 类型 | 必需 | 适用type | 说明 |
+|------|------|------|---------|------|
+| `selector` | `string` | 是 | 全部 | 选择器表达式 |
+| `type` | `string` | 否 | 全部 | 参见常量表，默认 'css' |
+| `attribute` | `string|null` | 否 | `regex` | 要匹配的属性名 |
+| `extractMode` | `string|null` | 否 | `regex` | 提取模式：`'elements'` `'text'` `'attr'` `'match'` |
+| `group` | `int|null` | 否 | `regex`+`match` | 正则分组索引 |
+| `location` | `array|null` | 否 | `regex` | 多分组提取配置 |
+| `extractOptions` | `array|null` | 否 | `table` `list` `text` | 提取选项，参见 B/C 表 |
+
+### F. Document 类便捷查询方法一览
+
+| 方法 | 功能 | 参数 | 返回值 |
+|------|------|------|--------|
+| `find()` | 查找匹配元素 | selector, type, contextNode | `Element[]|string[]|array[]` |
+| `first()` | 查找第一个匹配 | selector, type, contextNode | `Element|string|array|null` |
+| `has()` | 检查是否存在 | selector | `bool` |
+| `count()` | 统计匹配数量 | selector | `int` |
+| `xpath()` | XPath 查询 | xpathExpression | `Element[]` |
+| `xpathFirst()` | XPath 首个 | xpathExpression | `?Element` |
+| `xpathTexts()` | XPath 文本 | xpathExpression | `string[]` |
+| `xpathAttrs()` | XPath 属性值 | xpathExpression, attribute | `string[]` |
+| `regex()` | 正则查找 | pattern, contextNode, attribute | `Element[]` |
+| `regexMatch()` | 正则匹配文本 | pattern, contextNode, attribute | `string[]|array[]` |
+| `regexMulti()` | 多正则匹配 | patterns, contextNode, attribute | `array` |
+| `regexReplace()` | 正则替换 | pattern, replacement, contextNode, attribute | `self` |
+| `findByText()` | 按文本查找 | text, selector | `Element[]` |
+| `findByAttribute()` | 按属性查找 | attribute, value, selector | `Element[]` |
+| `findByData()` | 按 data 属性查找 | dataName, value, selector | `Element[]` |
+| `findByHtml()` | 按 HTML 查找 | html, selector | `Element[]` |
+| `findByPath()` | 按路径查找 | path, relative | `Element[]` |
+| `findByIndex()` | 按索引查找 | selector, index | `?Element` |
+| `findLast()` | 查找最后一个 | selector | `?Element` |
+| `findByRange()` | 范围查找 | selector, start, end | `Element[]` |
+| `text()` | 获取文本 | selector | `string|?Element` |
+| `html()` | 获取 HTML | selector | `string` |
+| `links()` | 获取所有链接 | selector | `array[]` |
+| `images()` | 获取所有图片 | selector | `array[]` |
+| `forms()` | 获取所有表单 | selector | `array[]` |
+| `inputs()` | 获取所有输入元素 | selector | `array[]` |
+| `extractTable()` | 提取表格 | table, options | `array[]` |
+| `extractList()` | 提取列表 | list, options | `array[]` |
+| `extractFormData()` | 提取表单 | form | `array` |
+| `extractLinks()` | 提取链接 | selector | `array[]` |
+| `extractImages()` | 提取图片 | selector | `array[]` |
+| `extractMetaData()` | 提取 meta | ...names | `array` |
+| `queryMatrix()` | 矩阵数据提取 | container, options | `array[]` |
+| `createElement()` | 创建元素 | tagName, value, attributes | `Element` |
+| `toHtml()` | 获取文档 HTML | — | `string` |
+| `save()` | 保存到文件 | filename | `self` |
+
+### G. Element 类便捷方法一览
+
+| 方法 | 功能 | 参数 | 返回值 |
+|------|------|------|--------|
+| `find()` | 查找后代 | selector, type | `Element[]` |
+| `first()` | 查找首个后代 | selector, type | `?Element` |
+| `matches()` | 是否匹配选择器 | selector | `bool` |
+| `children()` | 获取子元素 | — | `Element[]` |
+| `parent()` | 获取父元素 | — | `?Element` |
+| `siblings()` | 获取兄弟元素 | — | `Element[]` |
+| `firstChild()` | 首个子元素 | — | `?Element` |
+| `lastChild()` | 最后子元素 | — | `?Element` |
+| `tagName()` | 标签名 | — | `string` |
+| `text()` | 文本内容 | — | `string` |
+| `html()` | HTML 内容 | — | `string` |
+| `attr()` | 获取/设置属性 | name, value | `?string|self` |
+| `classes()` | 类管理对象 | — | `ClassAttribute` |
+| `style()` | 样式管理对象 | — | `StyleAttribute` |
+| `css()` | 获取/设置样式 | name, value | `?string|self` |
+| `setAttribute()` | 设置属性 | name, value | `self` |
+| `getAttribute()` | 获取属性 | name, default | `?string` |
+| `hasAttribute()` | 检查属性 | name | `bool` |
+| `removeAttribute()` | 移除属性 | name | `self` |
+| `addClass()` | 添加类 | ...classNames | `self` |
+| `removeClass()` | 移除类 | ...classNames | `self` |
+| `toggleClass()` | 切换类 | className | `self` |
+| `hasClass()` | 检查类 | className | `bool` |
+| `setHtml()` | 设置 HTML | html | `self` |
+| `setText()` | 设置文本 | text | `self` |
+| `setValue()` | 设置值 | value | `self` |
+| `append()` | 追加子节点 | nodes | `Node|Node[]` |
+| `prepend()` | 开头插入子节点 | nodes | `Node|Node[]` |
+| `before()` | 之前插入 | nodes | `Node|Node[]` |
+| `after()` | 之后插入 | nodes | `Node|Node[]` |
+| `replaceWith()` | 替换 | nodes | `self` |
+| `remove()` | 移除 | — | `self` |
+| `clone()` | 克隆 | deep | `Node` |
+| `index()` | 兄弟索引 | — | `int` |
+| `getPath()` | 节点路径 | separator | `string` |
+| `extractTable()` | 提取表格 | selector, options | `array` |
+| `extractTableData()` | 自身为表格提取 | options | `array` |
+| `extractList()` | 提取列表 | selector, options | `array` |
+| `extractFormData()` | 提取表单 | selector | `array` |
+| `extractLinks()` | 提取链接 | selector | `array` |
+| `extractImages()` | 提取图片 | selector | `array` |
+| `extractTexts()` | 提取文本 | selector, trim | `string[]` |
+| `extractTableHeaders()` | 提取表头 | options | `string[]` |
+| `extractTableRows()` | 提取行 | options | `array[]` |
+| `extractTableColumn()` | 提取列 | column, options | `string[]` |
+| `extractTableAsAssociative()` | 关联数组格式 | options | `array[]` |
+| `extractNestedTables()` | 嵌套表格 | selector, options | `array[]` |
+| `queryMatrix()` | 矩阵数据 | containerSelector, options | `array[]` |
+| `regex()` | 正则查找 | pattern, attribute | `Element[]` |
+| `regexMatch()` | 正则匹配 | pattern, attribute | `array` |
+| `regexReplace()` | 正则替换 | pattern, replacement, attribute | `self` |
+| `findByText()` | 文本查找 | text, selector | `Element[]` |
+| `findByAttribute()` | 属性查找 | attribute, value, selector | `Element[]` |
+
+### H. Query 类静态方法一览
+
+| 方法 | 功能 | 参数 | 返回值 |
+|------|------|------|--------|
+| `compile()` | 编译选择器 | expression, type | `string`（XPath） |
+| `detectSelectorType()` | 检测选择器类型 | selector | `'css'` `'xpath'` `'regex'` |
+| `isXPathAbsolute()` | 是否 XPath 绝对路径 | expression | `bool` |
+| `isXPathRelative()` | 是否 XPath 相对路径 | expression | `bool` |
+| `cssToXpath()` | CSS 转 XPath | selector | `string` |
+| `parseSelector()` | 解析选择器 | selector | `array` |
+| `initialize()` | 初始化 | — | `void` |
+| `getCacheStats()` | 缓存统计 | — | `array` |
+| `clearCompiled()` | 清空缓存 | — | `void` |
+| `reset()` | 重置 | — | `void` |

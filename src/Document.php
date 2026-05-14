@@ -509,10 +509,16 @@ class Document
     /**
      * 查找匹配选择器的元素
      *
+     * 统一的选择器查找入口，支持多种选择器类型：
+     * - CSS 选择器、XPath 表达式、正则表达式
+     * - 表格数据提取、列表数据提取、表单数据提取
+     * - 链接数据提取、图片数据提取、文本内容提取
+     * - JSON 数据提取
+     *
      * @param  string  $expression  选择器表达式
-     * @param  string  $type  选择器类型（CSS、XPath 或 Regex）
+     * @param  string  $type  选择器类型（CSS、XPath、Regex、Table、List、Form、Link、Image、Text、Json）
      * @param  DOMElement|null  $contextNode  上下文节点
-     * @return array<int, Element|string> 匹配的元素数组或文本/属性值数组
+     * @return array<int, Element|string|array> 匹配的元素数组或提取的结构化数据
      *
      * @throws InvalidSelectorException 当选择器无效时抛出
      * @throws InvalidArgumentException 当上下文节点无效时抛出
@@ -523,33 +529,70 @@ class Document
         string $type = Query::TYPE_CSS,
         ?DOMElement $contextNode = null
     ): array {
+        $type = strtolower($type);
+
+        // 处理 JSON 选择器
+        if ($type === Query::TYPE_JSON) {
+            $result = $this->handleJsonData($this->originalContent);
+            return $result !== false ? $result : [];
+        }
+
+        // 处理表格数据提取
+        if ($type === Query::TYPE_TABLE) {
+            return $this->extractTable($expression ?: null);
+        }
+
+        // 处理列表数据提取
+        if ($type === Query::TYPE_LIST) {
+            return $this->extractList($expression ?: null);
+        }
+
+        // 处理表单数据提取
+        if ($type === Query::TYPE_FORM) {
+            return [$this->extractFormData($expression ?: 'form')];
+        }
+
+        // 处理链接数据提取
+        if ($type === Query::TYPE_LINK) {
+            return $this->extractLinks($expression ?: 'a');
+        }
+
+        // 处理图片数据提取
+        if ($type === Query::TYPE_IMAGE) {
+            return $this->extractImages($expression ?: 'img');
+        }
+
+        // 处理文本内容提取
+        if ($type === Query::TYPE_TEXT) {
+            $elements = $this->doFind($expression, Query::TYPE_CSS, true, $contextNode);
+            return array_map(fn($el) => $el->text(), $elements);
+        }
+
         // 处理正则表达式选择器
-        if (strcasecmp($type, Query::TYPE_REGEX) === 0) {
+        if ($type === Query::TYPE_REGEX) {
             return $this->findByRegex($expression, $contextNode);
         }
 
         // 处理 XPath 表达式中的 /text() 函数（直接文本节点）
-        // 例如：//div[@class="content"]/text()
-        if (strcasecmp($type, Query::TYPE_XPATH) === 0 && str_ends_with($expression, '/text()')) {
-            $baseExpression = substr($expression, 0, -7); // 移除 '/text()' (7个字符)
+        if ($type === Query::TYPE_XPATH && str_ends_with($expression, '/text()')) {
+            $baseExpression = substr($expression, 0, -7);
             return $this->doFindTextNodes($baseExpression, $contextNode);
         }
 
         // 处理 XPath 表达式中的 text() 函数（所有文本节点）
-        // 例如：//div[@class="content"]//text()
-        if (strcasecmp($type, Query::TYPE_XPATH) === 0 && str_contains($expression, '//text()')) {
+        if ($type === Query::TYPE_XPATH && str_contains($expression, '//text()')) {
             return $this->doFind($expression, $type, false, $contextNode);
         }
 
         // 处理 ::text 伪元素（CSS方式获取元素文本）
         if (str_ends_with($expression, '::text')) {
-            $cleanSelector = substr($expression, 0, -6); // ::text 是 6 个字符
+            $cleanSelector = substr($expression, 0, -6);
             $elements = $this->doFind($cleanSelector, $type, true, $contextNode);
             return array_map(fn($el) => $el->text(), $elements);
         }
 
         // 处理 ::attr(name) 伪元素
-        if (preg_match('/::attr\\(([^)]+)\\)$/', $expression, $matches)) {
+        if (preg_match('/::attr\(([^)]+)\)$/', $expression, $matches)) {
             $attrName = trim($matches[1], '"\'');
             $cleanSelector = substr($expression, 0, -strlen($matches[0]));
             $elements = $this->doFind($cleanSelector, $type, true, $contextNode);
@@ -560,18 +603,30 @@ class Document
     }
 
     /**
-     * 获取第一个匹配的元素
+     * 获取第一个匹配的元素或第一个提取结果
+     *
+     * 对于 CSS/XPath/正则选择器，返回第一个匹配的 Element 对象。
+     * 对于 table/list/form/link/image/text/json 提取类型，返回第一个提取结果。
      *
      * @param  string  $expression  选择器表达式
-     * @param  string  $type  选择器类型（CSS 或 XPath）
+     * @param  string  $type  选择器类型（CSS、XPath、Regex、Table、List、Form、Link、Image、Text、Json）
      * @param  DOMElement|null  $contextNode  上下文节点
-     * @return Element|null 第一个匹配的元素或 null
+     * @return Element|string|array|null 第一个匹配的元素、提取结果或 null
      */
     public function first(
         string $expression,
         string $type = Query::TYPE_CSS,
         ?DOMElement $contextNode = null
-    ): ?Element {
+    ): Element|string|array|null {
+        $type = strtolower($type);
+
+        // 处理提取类型，返回第一个结果
+        $extractTypes = [Query::TYPE_TABLE, Query::TYPE_LIST, Query::TYPE_FORM, Query::TYPE_LINK, Query::TYPE_IMAGE, Query::TYPE_TEXT, Query::TYPE_JSON];
+        if (in_array($type, $extractTypes, true)) {
+            $results = $this->find($expression, $type, $contextNode);
+            return $results[0] ?? null;
+        }
+
         $elements = $this->doFind($expression, $type, true, $contextNode);
         return $elements[0] ?? null;
     }
@@ -2086,6 +2141,112 @@ class Document
      *     ['selector' => '/html/body/div[1]/h1', 'type' => 'xpath']
      * ]);
      */
+    /**
+     * 使用选择器数组回退查找元素
+     *
+     * 此方法支持传入多个选择器，按顺序尝试，找到第一个非空结果即返回。
+     * 支持混合使用 CSS、XPath、正则表达式、JSON、表格、列表等多种选择器类型。
+     * 适用于处理不同结构的网页，提供极大的灵活性。
+     *
+     * @param  array<int, array{
+     *     selector: string,
+     *     type?: string,
+     *     attribute?: string|null,
+     *     extractMode?: string|null,
+     *     group?: int|null,
+     *     location?: array|null,
+     *     extractOptions?: array<string, mixed>|null
+     * }>  $selectors  选择器数组，每个元素包含 selector 和可选的 type/attribute/extractMode/group/location/extractOptions
+     * @param  DOMElement|null  $contextNode  上下文节点（可选）
+     * @param  bool|null  $getFirst  是否在找到第一个非空结果后立即返回（true=是，false=收集所有结果）
+     * @return array<int, Element|string|array> 匹配的结果数组
+     *
+     * @example
+     * // 基本用法：CSS 选择器
+     * $elements = $doc->findWithFallback([
+     *     ['selector' => 'h1.title'],
+     *     ['selector' => 'h2.subtitle'],
+     * ]);
+     *
+     * // 混合使用 CSS、XPath 和正则表达式
+     * $elements = $doc->findWithFallback([
+     *     ['selector' => 'div.main-content > h1'],
+     *     ['selector' => '//div[@class="main-content"]/h1', 'type' => 'xpath'],
+     *     ['selector' => '/html/body/div/h1', 'type' => 'xpath'],
+     * ]);
+     *
+     * // 提取表格数据
+     * $tableData = $doc->findWithFallback([
+     *     ['selector' => 'table.data-table', 'type' => 'table'],
+     *     ['selector' => 'table.results', 'type' => 'table'],
+     * ]);
+     *
+     * // 提取列表数据
+     * $listData = $doc->findWithFallback([
+     *     ['selector' => 'ul.products', 'type' => 'list'],
+     *     ['selector' => 'ol.items', 'type' => 'list'],
+     * ]);
+     *
+     * // 提取表单数据
+     * $formData = $doc->findWithFallback([
+     *     ['selector' => 'form#login', 'type' => 'form'],
+     * ]);
+     *
+     * // 提取链接数据
+     * $links = $doc->findWithFallback([
+     *     ['selector' => 'a.external', 'type' => 'link'],
+     * ]);
+     *
+     * // 提取图片数据
+     * $images = $doc->findWithFallback([
+     *     ['selector' => 'img.thumbnail', 'type' => 'image'],
+     * ]);
+     *
+     * // 提取文本内容
+     * $texts = $doc->findWithFallback([
+     *     ['selector' => 'div.description', 'type' => 'text'],
+     * ]);
+     *
+     * // 带提取选项
+     * $tableData = $doc->findWithFallback([
+     *     [
+     *         'selector' => 'table.data',
+     *         'type' => 'table',
+     *         'extractOptions' => [
+     *             'headerRow' => 0,
+     *             'skipRows' => 1,
+     *             'returnFormat' => 'associative',
+     *         ],
+     *     ],
+     * ]);
+     *
+     * // 使用正则表达式提取分组数据
+     * $matches = $doc->findWithFallback([
+     *     [
+     *         'selector' => '/(\w+)\s*[:：]\s*([\d.]+)/',
+     *         'type' => 'regex',
+     *         'extractMode' => 'match',
+     *         'group' => 1,
+     *     ],
+     * ]);
+     *
+     * // 使用 location 参数提取多列数据
+     * $results = $doc->findWithFallback([
+     *     [
+     *         'selector' => '/(\w+)\s*[:：]\s*(\d+)/',
+     *         'type' => 'regex',
+     *         'location' => [
+     *             'name' => ['index' => 1, 'description' => '姓名'],
+     *             'age' => ['index' => 2, 'description' => '年龄'],
+     *         ],
+     *     ],
+     * ]);
+     *
+     * // JSON 数据选择器
+     * $jsonData = $doc->findWithFallback([
+     *     ['selector' => '', 'type' => 'json'],
+     * ]);
+     */
     public function findWithFallback(
         array $selectors,
         ?DOMElement $contextNode = null,
@@ -2096,28 +2257,62 @@ class Document
             try {
                 // 获取选择器配置
                 $selector = $selectorConfig['selector'] ?? '';
-                $type = ($selectorConfig['type'] ?? 'css');
+                $type = strtolower($selectorConfig['type'] ?? 'css');
                 $attribute = $selectorConfig['attribute'] ?? null;
                 $extractMode = $selectorConfig['extractMode'] ?? null;
                 $group = $selectorConfig['group'] ?? null;
                 $location = $selectorConfig['location'] ?? null;
+                $extractOptions = $selectorConfig['extractOptions'] ?? [];
 
-                if (strcasecmp($type, Query::TYPE_JSON) === 0) {
+                if ($type === Query::TYPE_JSON) {
                     // json 数组或者字符串
                     $result = $this->handleJsonData($this->originalContent);
-                }else{
+                } elseif ($type === Query::TYPE_TABLE) {
+                    // 表格数据提取
+                    if (empty($selector)) {
+                        $result = $this->extractTable(null, $extractOptions);
+                    } else {
+                        $result = $this->extractTable($selector, $extractOptions);
+                    }
+                } elseif ($type === Query::TYPE_LIST) {
+                    // 列表数据提取
+                    if (empty($selector)) {
+                        $result = $this->extractList(null, $extractOptions);
+                    } else {
+                        $result = $this->extractList($selector, $extractOptions);
+                    }
+                } elseif ($type === Query::TYPE_FORM) {
+                    // 表单数据提取
+                    if (empty($selector)) {
+                        $result = $this->extractFormData('form');
+                    } else {
+                        $result = $this->extractFormData($selector);
+                    }
+                } elseif ($type === Query::TYPE_LINK) {
+                    // 链接数据提取
+                    $result = $this->extractLinks($selector ?: 'a');
+                } elseif ($type === Query::TYPE_IMAGE) {
+                    // 图片数据提取
+                    $result = $this->extractImages($selector ?: 'img');
+                } elseif ($type === Query::TYPE_TEXT) {
+                    // 文本内容提取
+                    $elements = $this->find($selector, Query::TYPE_CSS, $contextNode);
+                    $result = [];
+                    foreach ($elements as $el) {
+                        $text = $extractOptions['trimText'] ?? true ? trim($el->text()) : $el->text();
+                        if (!empty($text) || !($extractOptions['removeEmpty'] ?? true)) {
+                            $result[] = $text;
+                        }
+                    }
+                } elseif ($type === Query::TYPE_REGEX) {
+                    // 正则表达式选择器
+                    $result = $this->handleRegexSelector($selector, $contextNode, $attribute, $extractMode, $group, $location);
+                } else {
                     if (empty($selector)) {
                         continue;
                     }
-
-                    // 根据类型执行查询
-                    if (strcasecmp($type, Query::TYPE_REGEX) === 0) {
-                        // 正则表达式选择器
-                        $result = $this->handleRegexSelector($selector, $contextNode, $attribute, $extractMode, $group, $location);
-                    } else {
-                        // CSS 或 XPath 选择器
-                        $result = $this->find($selector, $type, $contextNode);
-                    }
+                    // CSS 或 XPath 选择器
+                    $result = $this->find($selector, $type, $contextNode);
                 }
 
                 // 如果找到结果，立即返回
@@ -2340,44 +2535,83 @@ class Document
      * 使用选择器数组回退查找第一个元素
      *
      * 此方法是 findWithFallback() 的便捷版本，只返回第一个匹配的元素。
+     * 支持所有选择器类型，包括 table、list、form、link、image、text 等。
      *
-     * @param  array<int, array{selector: string, type?: string, attribute?: string}>  $selectors  选择器数组
+     * 对于提取类型（table、list、form、link、image），如果找到结果，
+     * 返回第一个结果的第一个元素（如果结果是数组）。
+     *
+     * @param  array<int, array{
+     *     selector: string,
+     *     type?: string,
+     *     attribute?: string|null,
+     *     extractMode?: string|null,
+     *     group?: int|null,
+     *     location?: array|null,
+     *     extractOptions?: array<string, mixed>|null
+     * }>  $selectors  选择器数组
      * @param  DOMElement|null  $contextNode  上下文节点（可选）
-     * @return Element|null 第一个匹配的元素或null
+     * @return Element|string|array|null 第一个匹配的结果或null
      *
      * @example
      * $element = $doc->findFirstWithFallback([
      *     ['selector' => '.main-title'],
      *     ['selector' => '//h1[@class="title"]', 'type' => 'xpath'],
-     *     ['selector' => '/html/body/h1', 'type' => 'xpath']
+     * ]);
+     *
+     * // 提取表格（返回第一个表格的结构化数据）
+     * $tableData = $doc->findFirstWithFallback([
+     *     ['selector' => 'table.data', 'type' => 'table'],
+     * ]);
+     *
+     * // 提取列表
+     * $listData = $doc->findFirstWithFallback([
+     *     ['selector' => 'ul.menu', 'type' => 'list'],
      * ]);
      */
     public function findFirstWithFallback(
         array $selectors,
         ?DOMElement $contextNode = null
-    ): ?Element {
+    ): Element|string|array|null {
         $results = $this->findWithFallback($selectors, $contextNode, true);
 
         if (empty($results)) {
             return null;
         }
 
-        // findWithFallback 返回的是结果数组，返回第一个元素
-        // 结果可能是 Element 对象或字符串（text/attr提取模式）
+        // 如果结果只有一个元素，直接返回第一个（可能是 Element、string、array）
+        $firstValue = reset($results);
+        if ($firstValue instanceof Element || is_string($firstValue) || is_array($firstValue)) {
+            return $firstValue;
+        }
+
+        // 遍历结果，返回第一个 Element 对象
         foreach ($results as $result) {
             if ($result instanceof Element) {
                 return $result;
             }
         }
 
-        return null;
+        // 如果是空数组或非预期类型
+        return is_array($results) && !empty($results) ? $results[array_key_first($results)] : null;
     }
 
     /**
-     * 查询选择器数组, 是 findWithFallback 获取列表的快捷方式
-     * @param array $selectors
-     * @param DOMElement|null $contextNode
-     * @return array<int, Element|string> 匹配的元素数组或文本/属性值数组
+     * 查询选择器数组，是 findWithFallback 获取所有结果的快捷方式
+     *
+     * 与 findWithFallback 不同，此方法不会在找到第一个结果后立即返回，
+     * 而是收集所有匹配选择器的结果并返回数组。
+     *
+     * @param  array<int, array{
+     *     selector: string,
+     *     type?: string,
+     *     attribute?: string|null,
+     *     extractMode?: string|null,
+     *     group?: int|null,
+     *     location?: array|null,
+     *     extractOptions?: array<string, mixed>|null
+     * }>  $selectors  选择器数组
+     * @param  DOMElement|null  $contextNode  上下文节点（可选）
+     * @return array<int, Element|string|array> 所有找到的结果的数组
      */
     public function queryWithFallback(
         array $selectors,
@@ -3129,14 +3363,18 @@ class Document
             if ($options['tableIndex'] !== null) {
                 $index = (int)$options['tableIndex'];
                 if (isset($tables[$index])) {
-                    return [$this->extractSingleTableStructured($tables[$index], $options)];
+                    if ($options['preserveStructure']) {
+                        return [$this->extractSingleTableStructured($tables[$index], $options)];
+                    } else {
+                        return [$this->extractSingleTable($tables[$index], $options)];
+                    }
                 }
                 return [];
             }
 
             // 返回所有表格的数据（结构化格式）
             return array_map(function($tableItem) use ($options) {
-                if ($options['preserveStructure'] && $options['returnFormat'] === 'structured') {
+                if ($options['preserveStructure']) {
                     return $this->extractSingleTableStructured($tableItem, $options);
                 } else {
                     return $this->extractSingleTable($tableItem, $options);
@@ -3144,7 +3382,7 @@ class Document
             }, $tables);
         } elseif ($table instanceof Element) {
             // 从Element对象提取（单个表格）
-            if ($options['preserveStructure'] && $options['returnFormat'] === 'structured') {
+            if ($options['preserveStructure']) {
                 return [$this->extractSingleTableStructured($table, $options)];
             } else {
                 return [$this->extractSingleTable($table, $options)];
@@ -3161,7 +3399,7 @@ class Document
             if ($options['tableIndex'] !== null) {
                 $index = (int)$options['tableIndex'];
                 if (isset($tableElements[$index])) {
-                    if ($options['preserveStructure'] && $options['returnFormat'] === 'structured') {
+                    if ($options['preserveStructure']) {
                         return [$this->extractSingleTableStructured($tableElements[$index], $options)];
                     } else {
                         return [$this->extractSingleTable($tableElements[$index], $options)];
@@ -3173,7 +3411,7 @@ class Document
             // 返回所有或第一个表格
             if ($options['returnAllTables']) {
                 return array_map(function($tableItem) use ($options) {
-                    if ($options['preserveStructure'] && $options['returnFormat'] === 'structured') {
+                    if ($options['preserveStructure']) {
                         return $this->extractSingleTableStructured($tableItem, $options);
                     } else {
                         return $this->extractSingleTable($tableItem, $options);
@@ -3182,7 +3420,7 @@ class Document
             } else {
                 // 只返回第一个表格
                 $firstTable = $tableElements[0];
-                if ($options['preserveStructure'] && $options['returnFormat'] === 'structured') {
+                if ($options['preserveStructure']) {
                     return [$this->extractSingleTableStructured($firstTable, $options)];
                 } else {
                     return [$this->extractSingleTable($firstTable, $options)];
@@ -3451,6 +3689,32 @@ class Document
             $result['tfoot'] = $this->extractTableFooter($tfoot, $options);
         }
 
+        // 根据 returnFormat 转换结构化数据
+        $returnFormat = $options['returnFormat'] ?? 'structured';
+        if ($returnFormat === 'associative') {
+            $headers = $result['thead'] ?? [];
+            $assocData = [];
+            foreach ($result['tbody'] as $row) {
+                $assocRow = [];
+                foreach ($row as $index => $value) {
+                    $assocRow[$headers[$index] ?? $index] = $value;
+                }
+                $assocData[] = $assocRow;
+            }
+            return $assocData;
+        }
+        if ($returnFormat === 'indexed') {
+            $indexedData = [];
+            foreach ($result['tbody'] as $row) {
+                $indexedRow = [];
+                foreach ($row as $value) {
+                    $indexedRow[] = $value;
+                }
+                $indexedData[] = $indexedRow;
+            }
+            return $indexedData;
+        }
+
         return $result;
     }
 
@@ -3673,6 +3937,32 @@ class Document
         $tfoot = $tableElement->first('tfoot');
         if ($tfoot !== null) {
             $result['tfoot'] = $this->extractTableFooter($tfoot, $options);
+        }
+
+        // 根据 returnFormat 转换结构化数据
+        $returnFormat = $options['returnFormat'] ?? 'structured';
+        if ($returnFormat === 'associative') {
+            $headers = $result['thead'] ?? [];
+            $assocData = [];
+            foreach ($result['tbody'] as $row) {
+                $assocRow = [];
+                foreach ($row as $index => $value) {
+                    $assocRow[$headers[$index] ?? $index] = $value;
+                }
+                $assocData[] = $assocRow;
+            }
+            return $assocData;
+        }
+        if ($returnFormat === 'indexed') {
+            $indexedData = [];
+            foreach ($result['tbody'] as $row) {
+                $indexedRow = [];
+                foreach ($row as $value) {
+                    $indexedRow[] = $value;
+                }
+                $indexedData[] = $indexedRow;
+            }
+            return $indexedData;
         }
 
         return $result;

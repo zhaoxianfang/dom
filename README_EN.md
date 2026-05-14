@@ -7,11 +7,19 @@ A powerful and easy-to-use PHP DOM manipulation library that provides a simple A
 
 ## Features
 
-- ✅ **Complete CSS3 Selector Support** - Support for 130+ CSS selector types
+- ✅ **Complete CSS3 Selector Support** - Support for 150+ CSS selector types
 - ✅ **Native XPath Support** - Direct XPath expression querying
 - ✅ **Rich Pseudo-classes** - Support for 100+ pseudo-class selectors
 - ✅ **Pseudo-element Support** - Support for `::text` and `::attr()` pseudo-elements
 - ✅ **Extended Selector Features** - Text length matching, attribute length/count selectors, depth-based selectors
+- ✅ **Regex Support** - Powerful regex matching and data extraction
+- ✅ **Table Data Extraction** - Structured table data extraction (thead/tbody/tfoot separation)
+- ✅ **List Data Extraction** - Nested list recursive extraction support
+- ✅ **Matrix Data Extraction** - Non-table grid data extraction with custom row/cell selectors
+- ✅ **Form Data Extraction** - Extract form field data as associative arrays
+- ✅ **Link/Image Data Extraction** - Extract structured link and image data
+- ✅ **Smart Selector Types** - findWithFallback supports css/xpath/regex/table/list/form/link/image/text/json (10 types)
+- ✅ **JSON Data Handling** - Parse and extract JSON strings/arrays/objects
 - ✅ **Chaining** - Fluent API design with chainable operations
 - ✅ **PHP 8.2+ Type System** - Complete type annotations for better IDE support
 - ✅ **HTML/XML Dual Mode** - Support for both HTML and XML document processing
@@ -379,12 +387,99 @@ $html = '<table>
 </table>';
 
 $doc = new Document($html);
-$rows = $doc->find('tr:not(:first-child)');
 
+// Method 1: Manual extraction
+$rows = $doc->find('tr:not(:first-child)');
 foreach ($rows as $row) {
     $cells = $row->find('td');
     echo $cells[0]->text() . ': ' . $cells[1]->text() . "\n";
 }
+
+// Method 2: extractTable() API
+$tableData = $doc->extractTable('table');
+// Returns structured data:
+// ['thead' => ['ID', 'Name'], 'tbody' => [['1', 'Product A'], ['2', 'Product B']]]
+
+// Method 3: Via findWithFallback
+$tableData = $doc->findWithFallback([
+    ['selector' => 'table', 'type' => 'table'],
+]);
+```
+
+### Example 5: Advanced Data Extraction with findWithFallback
+
+```php
+$html = '<div>
+    <table class="products">
+        <thead><tr><th>Name</th><th>Price</th></tr></thead>
+        <tbody>
+            <tr><td>Product A</td><td>$10</td></tr>
+            <tr><td>Product B</td><td>$20</td></tr>
+        </tbody>
+    </table>
+    <ul class="categories">
+        <li>Category 1</li>
+        <li>Category 2</li>
+        <li>Category 3</li>
+    </ul>
+    <form id="search-form">
+        <input name="keyword" value="search">
+        <input name="page" value="1">
+    </form>
+</div>';
+
+$doc = new Document($html);
+
+// Extract table data with fallback
+$tableData = $doc->findWithFallback([
+    ['selector' => 'table.products', 'type' => 'table'],
+    ['selector' => 'table.data', 'type' => 'table'],
+]);
+
+// Extract list data
+$listData = $doc->findWithFallback([
+    ['selector' => 'ul.categories', 'type' => 'list'],
+    ['selector' => 'ol.items', 'type' => 'list'],
+]);
+
+// Extract form data
+$formData = $doc->findWithFallback([
+    ['selector' => 'form#search-form', 'type' => 'form'],
+]);
+
+// Extract links
+$links = $doc->findWithFallback([
+    ['selector' => 'a.external', 'type' => 'link'],
+    ['selector' => 'a[href^="https"]', 'type' => 'link'],
+]);
+
+// Extract images
+$images = $doc->findWithFallback([
+    ['selector' => 'img.thumbnail', 'type' => 'image'],
+]);
+
+// Extract text content
+$texts = $doc->findWithFallback([
+    ['selector' => 'p.description', 'type' => 'text'],
+]);
+
+// Mixed types
+$results = $doc->findWithFallback([
+    ['selector' => 'table.products', 'type' => 'table'],
+    ['selector' => 'ul.categories', 'type' => 'list'],
+]);
+
+// With custom options
+$tableData = $doc->findWithFallback([
+    [
+        'selector' => 'table.products',
+        'type' => 'table',
+        'extractOptions' => [
+            'returnFormat' => 'associative',
+            'includeHeader' => true,
+        ],
+    ],
+]);
 ```
 
 ## Performance Tips
@@ -448,5 +543,67 @@ For issues and questions, please use the GitHub issue tracker.
 
 ---
 
-*Version: 1.0.0*  
-*Last Updated: 2026-01-07*
+*Version: 2.0.0*  
+*Last Updated: 2026-05-14*
+
+---
+
+## Appendix: Quick Parameter Reference
+
+### selectors Array Format (for findWithFallback)
+
+```php
+[
+    'selector'       => 'string',      // CSS/XPath/Regex selector expression
+    'type'           => 'string',      // css|xpath|regex|table|list|form|link|image|text|json
+    'attribute'      => 'string|null',  // only for type=regex, attribute name to match
+    'extractMode'    => 'string|null',  // only for type=regex: elements|text|attr|match
+    'group'          => 'int|null',     // only for extractMode=match, group index
+    'location'       => 'array|null',   // only for type=regex, multi-group extraction config
+    'extractOptions' => 'array|null',   // only for type=table|list|text, extraction options
+]
+```
+
+### extractTable Options
+
+```php
+$options = [
+    'selectorType'          => 'auto',       // auto|css|xpath|regex
+    'headerRow'             => 0,            // header row index (0-based)
+    'skipRows'              => 0,            // rows to skip from start
+    'includeHeader'         => true,         // include header data
+    'includeHeaderAsFirstRow' => false,      // include header as first row
+    'trimText'              => true,         // trim cell whitespace
+    'removeEmpty'           => true,         // remove empty rows
+    'cellSelector'          => 'td, th',     // cell selector
+    'rowSelector'           => 'tr',         // row selector
+    'returnFormat'          => 'structured', // structured|associative|indexed|both
+    'preserveStructure'     => true,         // preserve thead/tbody/tfoot
+    'returnAllTables'       => true,         // return all matching tables
+    'tableIndex'            => null,         // specify table index
+];
+```
+
+### extractList Options
+
+```php
+$options = [
+    'recursive'    => false,  // recursively extract nested lists
+    'trimText'     => true,   // trim whitespace
+    'includeIndex' => false,  // include index number
+];
+```
+
+### queryMatrix Options
+
+```php
+$options = [
+    'rowSelector'  => null,    // row selector, null=direct children
+    'cellSelector' => null,    // cell selector, null=direct children
+    'trimText'     => true,    // trim whitespace
+    'removeEmpty'  => true,    // remove empty rows
+    'selectorType' => 'auto',  // auto|css|xpath|regex
+];
+```
+
+For complete API documentation, see `src/docs/RULE_GUIDE.md` and `src/docs/USER_GUIDE.md`.

@@ -1675,10 +1675,150 @@ foreach ($relativeTests as $path => $expected) {
     echo "  $status isXPathRelative('$path'): " . ($result ? 'true' : 'false') . "\n";
 }
 
-// ==================== 总结 ====================
+// ==================== 示例 42: findWithFallback 表格/列表/表单提取 ====================
+
+echo "\n--- 示例 42: findWithFallback 表格/列表/表单提取 ---\n\n";
+
+$html42 = '<div>
+    <table class="products" id="product-table">
+        <thead>
+            <tr><th>产品名称</th><th>价格</th><th>库存</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>产品A</td><td>¥100</td><td>50</td></tr>
+            <tr><td>产品B</td><td>¥200</td><td>30</td></tr>
+            <tr><td>产品C</td><td>¥150</td><td>80</td></tr>
+        </tbody>
+        <tfoot>
+            <tr><td colspan="3">共3个产品</td></tr>
+        </tfoot>
+    </table>
+
+    <ul class="category-list">
+        <li>电子产品
+            <ul>
+                <li>手机</li>
+                <li>电脑</li>
+            </ul>
+        </li>
+        <li>家居用品</li>
+        <li>服装鞋帽
+            <ul>
+                <li>男装</li>
+                <li>女装</li>
+            </ul>
+        </li>
+    </ul>
+
+    <form id="product-filter">
+        <input name="keyword" value="电子产品">
+        <select name="sort">
+            <option value="price">价格排序</option>
+            <option value="name">名称排序</option>
+        </select>
+        <input name="page" value="1" type="hidden">
+        <button type="submit">筛选</button>
+    </form>
+
+    <a href="https://shop.example.com/product/1" class="product-link">产品A详情</a>
+    <a href="https://shop.example.com/product/2" class="product-link">产品B详情</a>
+
+    <img src="https://shop.example.com/img/product1.jpg" class="product-img" alt="产品A图片">
+    <img src="https://shop.example.com/img/product2.jpg" class="product-img" alt="产品B图片">
+</div>';
+
+$doc42 = new Document($html42);
+
+echo "1. 使用 findWithFallback 提取表格数据:\n";
+$tableData = $doc42->findWithFallback([
+    ['selector' => 'table.products', 'type' => 'table'],
+]);
+if (!empty($tableData) && isset($tableData[0]['thead'])) {
+    echo "   表头: " . implode(', ', $tableData[0]['thead']) . "\n";
+    echo "   行数: " . count($tableData[0]['tbody']) . "\n";
+    foreach ($tableData[0]['tbody'] as $row) {
+        echo "   " . implode(' | ', $row) . "\n";
+    }
+}
+
+echo "\n2. 使用 extractOptions 自定义表格提取:\n";
+$assocTable = $doc42->findWithFallback([
+    [
+        'selector' => 'table.products',
+        'type' => 'table',
+        'extractOptions' => [
+            'returnFormat' => 'associative',
+        ],
+    ],
+]);
+if (!empty($assocTable)) {
+    foreach ($assocTable as $row) {
+        if (is_array($row)) {
+            echo "   {$row['产品名称']} - {$row['价格']} - 库存: {$row['库存']}\n";
+        }
+    }
+}
+
+echo "\n3. 使用 findWithFallback 提取列表数据:\n";
+$listData = $doc42->findWithFallback([
+    ['selector' => 'ul.category-list', 'type' => 'list'],
+]);
+echo "   列表项: " . implode(', ', array_filter($listData, 'is_string')) . "\n";
+
+echo "\n4. 递归提取嵌套列表:\n";
+$nestedList = $doc42->findWithFallback([
+    [
+        'selector' => 'ul.category-list',
+        'type' => 'list',
+        'extractOptions' => ['recursive' => true],
+    ],
+]);
+print_r($nestedList);
+
+echo "\n5. 使用 findWithFallback 提取表单数据:\n";
+$formData = $doc42->findWithFallback([
+    ['selector' => 'form#product-filter', 'type' => 'form'],
+]);
+if (!empty($formData)) {
+    foreach ($formData as $name => $value) {
+        echo "   {$name}: {$value}\n";
+    }
+}
+
+echo "\n6. 使用 findWithFallback 提取链接数据:\n";
+$links = $doc42->findWithFallback([
+    ['selector' => 'a.product-link', 'type' => 'link'],
+]);
+foreach ($links as $link) {
+    echo "   {$link['text']} -> {$link['href']}\n";
+}
+
+echo "\n7. 使用 findWithFallback 提取图片数据:\n";
+$images = $doc42->findWithFallback([
+    ['selector' => 'img.product-img', 'type' => 'image'],
+]);
+foreach ($images as $img) {
+    echo "   {$img['alt']} -> {$img['src']}\n";
+}
+
+echo "\n8. 混合类型回退查找:\n";
+$mixed = $doc42->findWithFallback([
+    ['selector' => 'table.nonexistent', 'type' => 'table'],
+    ['selector' => 'ul.category-list', 'type' => 'list'],
+    ['selector' => 'a.product-link', 'type' => 'link'],
+]);
+echo "   结果数: " . count($mixed) . "\n";
+
+echo "\n9. 表格回退（不同结构表格）:\n";
+$htmlTableFallback = '<div>
+    <table class="new-version"><tr><td>新版数据</td></tr></table>
+    <table class="old-version"><tr><td>旧版数据</td></tr></table>
+</div>';
+$docFallback = new Document($htmlTableFallback);
+$fallbackTable = $docFallback->findWithFallback([
+    ['selector' => 'table.new-version', 'type' => 'table'],
+    ['selector' => 'table.old-version', 'type' => 'table'],
+]);
+echo "   找到表格行数: " . (isset($fallbackTable[0]['tbody']) ? count($fallbackTable[0]['tbody']) : 0) . "\n";
 
 echo "\n=== 示例完成 ===\n";
-echo "以上示例展示了 zxf/dom 库的主要功能和使用方法。\n";
-echo "包括 100+ 种选择器的完整支持。\n";
-echo "更多信息请参考 README.md 文件和 RULE_GUIDE.md 文件。\n";
-

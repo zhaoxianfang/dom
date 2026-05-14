@@ -27,8 +27,9 @@
 | 选择器                               | 类型            | 参数说明                                      | 使用示例                                                                                              | 描述                                                                                                                                    |
 |-----------------------------------|---------------|-------------------------------------------|---------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
 | **便捷查找方法**                        |
-| `findWithFallback()`              | 回退查找          | selectors: 选择器数组                          | `$doc->findWithFallback([...])`                                                                   | 传入多个选择器，按顺序尝试，找到第一个非空结果即返回。支持混合使用CSS、XPath和正则表达式选择器。适用于处理不同结构的网页，提供极大的灵活性。                                                            |
-| `findFirstWithFallback()`         | 回退查找首个        | selectors: 选择器数组                          | `$doc->findFirstWithFallback([...])`                                                              | `findWithFallback()` 的便捷版本，只返回第一个匹配的元素。适用于只需要获取单个匹配元素的场景。                                                                             |
+| `findWithFallback()`              | 回退查找          | selectors: 选择器数组                          | `$doc->findWithFallback([...])`                                                                   | 传入多个选择器，按顺序尝试，找到第一个非空结果即返回。支持混合使用CSS、XPath、正则、表格(table)、列表(list)、表单(form)、链接(link)、图片(image)、文本(text)和JSON等选择器类型。适用于处理不同结构的网页和数据，提供极大的灵活性。                                                            |
+| `findFirstWithFallback()`         | 回退查找首个        | selectors: 选择器数组                          | `$doc->findFirstWithFallback([...])`                                                              | `findWithFallback()` 的便捷版本，只返回第一个匹配的结果。支持所有选择器类型，适用于只需要获取单个匹配元素或数据的场景。                                                                             |
+| `queryWithFallback()`             | 回退查找所有        | selectors: 选择器数组                          | `$doc->queryWithFallback([...])`                                                                  | 收集所有匹配选择器的结果，不会在找到第一个结果后立即返回。适用于需要同时获取多个选择器查询结果的场景。                                                                                         |
 | `findByPath()`                    | 路径查找          | path: 路径表达式, relative: 是否相对路径             | `$doc->findByPath('/html/body/div')`                                                              | 按路径表达式查找元素，支持类似文件系统的路径语法。提供完整的全路径选择能力，包括XPath绝对路径、相对路径和CSS路径。                                                                         |
 | `findByText()`                    | 文本查找          | text: 文本内容, context: 上下文节点                | `$doc->findByText('Hello')`                                                                       | 查找包含指定文本的元素。搜索范围包括元素自身和所有子元素的文本内容。常用于快速定位包含特定关键词的元素。                                                                                  |
 | `findByAttribute()`               | 属性查找          | attr: 属性名, value: 属性值                     | `$doc->findByAttribute('href', 'https://')`                                                       | 查找具有指定属性或属性值的元素。如果只提供属性名，则查找所有具有该属性的元素；如果同时提供属性值，则查找属性值完全匹配的元素。                                                                       |
@@ -37,12 +38,13 @@
 | `findByIndex()`                   | 索引查找          | selector: 选择器, index: 索引                  | `$doc->findByIndex('.item', 2)`                                                                   | 查找匹配选择器的元素集合中指定索引位置的元素。索引从0开始，负数表示从后往前计数（-1表示最后一个）。                                                                                   |
 | `findLast()`                      | 查找最后一个        | selector: 选择器                             | `$doc->findLast('.item')`                                                                         | 查找匹配选择器的所有元素中的最后一个元素。等同于获取结果集的最后一个元素，语法更简洁。                                                                                           |
 | `findRange()`                     | 范围查找          | selector: 选择器, start: 开始, end: 结束         | `$doc->findRange('.item', 0, 5)`                                                                  | 查找匹配选择器的元素集合中指定索引范围内的元素。返回从start到end（包含）之间的所有元素。索引从0开始。                                                                               |
-| `extractTable()`                  | 表格查找          | CSS/XPath/正则/Element 选择器                  | `$doc->extractTable() 或者 $doc->extractTable('table.mymy_table') `                                 | 提取表格数据（CSS/XPath/正则/Element）                                                                                                          |
-| `extractList()`                   | 表格查找：提取列表数据   | CSS/XPath/正则/Element 选择器                  | `$doc->extractList()`                                                                             | 提取列表数据                                                                                                                                |
-| `extractFormData()`               | 表格查找：提取表单数据   | CSS/XPath/正则/Element 选择器                  | `$doc->extractFormData()`                                                                         | 提取表单数据                                                                                                                                |
-| `extractLinks()`                  | 提取链接数据        | CSS/XPath/正则/Element 选择器                  | `$doc->extractLinks()`                                                                            | 提取链接数据                                                                                                                                |
-| `extractImages()`                 | 提取图片数据        | CSS/XPath/正则/Element 选择器                  | `$doc->extractImages()`                                                                           | 提取图片数据                                                                                                                                |
-| `queryMatrix()`                   | 类似表格结构的「矩阵」数据 | CSS/XPath/正则/Element 选择器                  | `$matrix = $doc->queryMatrix('.matrix', [ 'rowSelector' => '.row', 'cellSelector' => '.cell' ]);` | 提取图片数据                                                                                                                                |
+| **数据提取方法**                        |
+| `extractTable()`                  | 表格数据提取        | CSS/XPath/正则/Element 选择器, options: 提取选项    | `$doc->extractTable()` 或 `$doc->extractTable('table.mytable')`                                    | 提取表格数据，支持CSS、XPath、正则选择器和Element对象。支持结构化返回（分离thead/tbody/tfoot）和扁平化返回。可通过options自定义headerRow、skipRows、returnFormat等。                           |
+| `extractList()`                   | 列表数据提取        | CSS/XPath/正则/Element 选择器, options: 提取选项    | `$doc->extractList()` 或 `$doc->extractList('ul.products')`                                        | 提取列表（ul/ol）数据，支持嵌套列表递归提取。可通过options控制recursive、trimText、includeIndex等选项。                                                                     |
+| `extractFormData()`               | 表单数据提取        | CSS/XPath/正则/Element 选择器                  | `$doc->extractFormData()` 或 `$doc->extractFormData('form#login')`                                 | 提取表单字段数据，返回字段名与值的关联数组。支持 input、select、textarea 等表单元素。                                                                      |
+| `extractLinks()`                  | 链接数据提取        | CSS选择器                                 | `$doc->extractLinks()` 或 `$doc->extractLinks('a.external')`                                       | 提取链接（a标签）数据，返回包含 href、text、title 的关联数组。                                                                                                      |
+| `extractImages()`                 | 图片数据提取        | CSS选择器                                 | `$doc->extractImages()` 或 `$doc->extractImages('img.thumbnail')`                                  | 提取图片数据，返回包含 src、alt、title 的关联数组。                                                                                                              |
+| `queryMatrix()`                   | 矩阵数据提取        | CSS选择器, options: rowSelector, cellSelector | `$doc->queryMatrix('.matrix', ['rowSelector' => '.row', 'cellSelector' => '.cell'])`               | 提取类似表格结构的「矩阵」数据，适用于非table标签的网格型数据布局。支持自定义行和单元格选择器。                                                                                         |
 | **选择器类型检测方法**                     |
 | `Query::detectSelectorType()`     | 类型检测          | selector: 选择器表达式                          | `Query::detectSelectorType('div')`                                                                | 智能识别选择器类型，返回 'css'、'xpath' 或 'regex'。可以自动区分CSS选择器、XPath表达式和正则表达式，为开发者提供便利的类型判断功能。                                                     |
 | `Query::isXPathAbsolute()`        | XPath绝对路径检测   | expression: XPath表达式                      | `Query::isXPathAbsolute('/html/body/div')`                                                        | 检测字符串是否为XPath绝对路径（以/开头但不是//）。XPath绝对路径从文档根元素开始，提供精确的元素定位路径。                                                                           |
@@ -344,14 +346,52 @@ $doc->findWithFallback([
 
 ### 参数说明
 
-| 参数          | 类型     | 必需 | 说明                                                        |
-|-------------|--------|----|-----------------------------------------------------------|
-| selector    | string | 是  | 选择器表达式                                                    |
-| type        | string | 否  | 选择器类型：'css'（默认）、'xpath'、'regex'                           |
-| attribute   | string | 否  | 仅当 type='regex' 时使用，指定要匹配的属性名                             |
-| extractMode | string | 否  | 仅当 type='regex' 时使用，提取模式：'elements'、'text'、'attr'、'match' |
-| group       | int    | 否  | 仅当 extractMode='match' 时使用，指定分组索引                         |
-| location    | array  | 否  | 仅当 type='regex' 时使用，指定提取多个分组并返回关联数组                       |
+| 参数            | 类型     | 必需 | 说明                                                                                                  |
+|---------------|--------|----|-----------------------------------------------------------------------------------------------------|
+| selector      | string | 是  | 选择器表达式                                                                                              |
+| type          | string | 否  | 选择器类型：'css'（默认）、'xpath'、'regex'、'table'、'list'、'form'、'link'、'image'、'text'、'json'                      |
+| attribute     | string | 否  | 仅当 type='regex' 时使用，指定要匹配的属性名                                                                       |
+| extractMode   | string | 否  | 仅当 type='regex' 时使用，提取模式：'elements'、'text'、'attr'、'match'                                           |
+| group         | int    | 否  | 仅当 extractMode='match' 时使用，指定分组索引                                                                   |
+| location      | array  | 否  | 仅当 type='regex' 时使用，指定提取多个分组并返回关联数组                                                                 |
+| extractOptions | array  | 否  | 提取选项数组，用于 table/list/text 等类型的自定义配置。如 `['headerRow' => 0, 'returnFormat' => 'associative']`      |
+
+### type 选择器类型详解
+
+| 类型      | 说明                                                                      | 返回值类型                                  | 示例                                                                  |
+|---------|-------------------------------------------------------------------------|-----------------------------------------|---------------------------------------------------------------------|
+| css     | CSS 选择器（默认），查找匹配的元素                                                   | `Element[]`                             | `['selector' => 'div.item']`                                         |
+| xpath   | XPath 表达式，查找匹配的元素                                                     | `Element[]`                             | `['selector' => '//div[@class="item"]', 'type' => 'xpath']`            |
+| regex   | 正则表达式，匹配文本内容或属性值                                                     | `Element[]` 或 `string[]`（根据extractMode） | `['selector' => '/\d+/', 'type' => 'regex']`                          |
+| table   | 表格数据提取，调用 `extractTable()` 提取结构化表格数据                                   | `array[]`（表格数据数组）                    | `['selector' => 'table.data', 'type' => 'table']`                     |
+| list    | 列表数据提取，调用 `extractList()` 提取列表数据                                       | `array[]`（列表数据数组）                    | `['selector' => 'ul.products', 'type' => 'list']`                     |
+| form    | 表单数据提取，调用 `extractFormData()` 提取表单字段                                   | `array`（表单字段关联数组）                   | `['selector' => 'form#login', 'type' => 'form']`                      |
+| link    | 链接数据提取，调用 `extractLinks()` 提取链接信息                                      | `array[]`（链接信息数组）                    | `['selector' => 'a.external', 'type' => 'link']`                      |
+| image   | 图片数据提取，调用 `extractImages()` 提取图片信息                                     | `array[]`（图片信息数组）                    | `['selector' => 'img.thumb', 'type' => 'image']`                      |
+| text    | 文本内容提取，返回元素的纯文本内容                                                     | `string[]`                              | `['selector' => 'p.description', 'type' => 'text']`                   |
+| json    | JSON 数据提取，将文档内容解析为 JSON 数组或对象                                           | `array`（JSON 解析结果）                   | `['selector' => '', 'type' => 'json']`                                |
+
+### extractOptions 选项说明
+
+当 type 为 `table` 或 `list` 时，可以通过 `extractOptions` 参数传递提取选项：
+
+**table 类型选项：**
+- `headerRow` (int): 表头行索引，默认 0
+- `skipRows` (int): 跳过的行数，默认 0
+- `includeHeader` (bool): 是否包含表头，默认 true
+- `includeHeaderAsFirstRow` (bool): 是否将表头作为第一行返回，默认 false
+- `trimText` (bool): 是否修剪空白，默认 true
+- `removeEmpty` (bool): 是否移除空行，默认 true
+- `cellSelector` (string): 单元格选择器，默认 'td, th'
+- `rowSelector` (string): 行选择器，默认 'tr'
+- `returnFormat` (string): 返回格式，'structured'（结构化）、'associative'（关联数组）、'indexed'（索引数组），默认 'structured'
+- `preserveStructure` (bool): 是否保留 thead/tbody/tfoot 结构，默认 true
+- `tableIndex` (int|null): 指定表格索引，null 表示返回所有
+
+**list 类型选项：**
+- `recursive` (bool): 是否递归提取嵌套列表，默认 false
+- `trimText` (bool): 是否修剪空白，默认 true
+- `includeIndex` (bool): 是否包含索引，默认 false
 
 
 1. **分组索引从0开始**: 正则表达式的分组索引从0开始，0表示完整匹配，1表示第一个捕获分组
@@ -498,7 +538,128 @@ print_r($links);
 // ]
 ```
 
-#### 7. 提取日期时间
+#### 7. 提取表格数据（table 类型）
+
+```php
+// 场景：从不同结构的表格中提取数据
+$html = '<div>
+    <table class="data-table">
+        <thead><tr><th>姓名</th><th>年龄</th></tr></thead>
+        <tbody><tr><td>张三</td><td>30</td></tr></tbody>
+    </table>
+    <table class="old-table">
+        <tr><td>姓名</td><td>年龄</td></tr>
+        <tr><td>李四</td><td>25</td></tr>
+    </table>
+</div>';
+$doc = new Document($html);
+
+// 优先使用新表格结构，回退到旧表格结构
+$results = $doc->findWithFallback([
+    ['selector' => 'table.data-table', 'type' => 'table'],
+    ['selector' => 'table.old-table', 'type' => 'table'],
+]);
+
+// 使用 extractOptions 自定义提取选项
+$results = $doc->findWithFallback([
+    [
+        'selector' => 'table.data-table',
+        'type' => 'table',
+        'extractOptions' => [
+            'returnFormat' => 'associative',
+            'includeHeader' => true,
+            'trimText' => true,
+        ],
+    ],
+    [
+        'selector' => 'table.old-table',
+        'type' => 'table',
+        'extractOptions' => [
+            'returnFormat' => 'associative',
+            'headerRow' => 0,
+        ],
+    ],
+]);
+// 返回: [['姓名' => '张三', '年龄' => '30'], ['姓名' => '李四', '年龄' => '25']]
+```
+
+#### 8. 提取列表数据（list 类型）
+
+```php
+// 场景：提取不同结构的列表数据
+$html = '<div>
+    <ul class="product-list">
+        <li>产品A</li>
+        <li>产品B</li>
+        <li>产品C</li>
+    </ul>
+    <ol class="old-product-list">
+        <li>旧产品A</li>
+        <li>旧产品B</li>
+    </ol>
+</div>';
+$doc = new Document($html);
+
+// 回退提取列表数据
+$items = $doc->findWithFallback([
+    ['selector' => 'ul.product-list', 'type' => 'list'],
+    ['selector' => 'ol.old-product-list', 'type' => 'list'],
+]);
+
+// 带选项提取
+$items = $doc->findWithFallback([
+    [
+        'selector' => 'ul.product-list',
+        'type' => 'list',
+        'extractOptions' => [
+            'recursive' => true,
+            'includeIndex' => true,
+        ],
+    ],
+]);
+```
+
+#### 9. 提取表单、链接、图片数据
+
+```php
+// 提取表单数据
+$formData = $doc->findWithFallback([
+    ['selector' => 'form#login', 'type' => 'form'],
+    ['selector' => 'form.old-login', 'type' => 'form'],
+]);
+
+// 提取链接数据
+$links = $doc->findWithFallback([
+    ['selector' => 'a.external-link', 'type' => 'link'],
+    ['selector' => 'a.old-link', 'type' => 'link'],
+]);
+
+// 提取图片数据
+$images = $doc->findWithFallback([
+    ['selector' => 'img.thumbnail', 'type' => 'image'],
+    ['selector' => 'img.thumb', 'type' => 'image'],
+]);
+
+// 提取文本内容
+$texts = $doc->findWithFallback([
+    ['selector' => 'p.description', 'type' => 'text'],
+    ['selector' => 'div.desc', 'type' => 'text'],
+]);
+```
+
+#### 10. 混合使用多种提取类型
+
+```php
+// 根据页面结构，灵活选择提取方式
+$result = $doc->findWithFallback([
+    // 优先尝试提取表格数据
+    ['selector' => 'table.products', 'type' => 'table'],
+    // 回退到提取列表数据
+    ['selector' => 'ul.products', 'type' => 'list'],
+    // 最后尝试提取链接中的文本
+    ['selector' => 'a.product', 'type' => 'link'],
+]);
+```
 
 ```php
 // 场景：从复杂格式中提取日期和时间
@@ -3318,3 +3479,1326 @@ $matrix = $doc->queryMatrix('.matrix');
 - **选择器**: 180+ 种  
 - **方法**: Document 100+ / Element 80+  
 - **矩阵查询**: ✅ 新增支持
+
+---
+
+# 附录：完整 API 参考手册
+
+本文档枚举了本扩展包中所有类的所有方法、每个方法的参数及其所有可配置项、适用场景和功能说明。
+
+---
+
+## 一、选择器类型常量（Query::TYPE_*）
+
+| 常量 | 值 | 说明 | 适用场景 | 配合方法 |
+|------|-----|------|---------|---------|
+| `Query::TYPE_CSS` | `'css'` | CSS 选择器，默认类型 | 标准 DOM 元素查找 | `find()`, `first()`, `findWithFallback()` |
+| `Query::TYPE_XPATH` | `'xpath'` | XPath 表达式 | 复杂条件查找、轴定位、文本节点 | `find()`, `first()`, `findWithFallback()` |
+| `Query::TYPE_REGEX` | `'regex'` | 正则表达式 | 文本/属性值模式匹配、模糊查找 | `find()`, `findWithFallback()` |
+| `Query::TYPE_TABLE` | `'table'` | 表格数据提取 | 提取 `<table>` 结构化数据 | `find()`, `first()`, `findWithFallback()` |
+| `Query::TYPE_LIST` | `'list'` | 列表数据提取 | 提取 `<ul>`/`<ol>` 列表项 | `find()`, `first()`, `findWithFallback()` |
+| `Query::TYPE_FORM` | `'form'` | 表单数据提取 | 提取 `<form>` 字段值 | `find()`, `first()`, `findWithFallback()` |
+| `Query::TYPE_LINK` | `'link'` | 链接数据提取 | 提取 `<a>` 链接信息 | `find()`, `first()`, `findWithFallback()` |
+| `Query::TYPE_IMAGE` | `'image'` | 图片数据提取 | 提取 `<img>` 图片信息 | `find()`, `first()`, `findWithFallback()` |
+| `Query::TYPE_TEXT` | `'text'` | 文本内容提取 | 提取元素纯文本内容 | `find()`, `first()`, `findWithFallback()` |
+| `Query::TYPE_JSON` | `'json'` | JSON 数据解析 | 解析 JSON 字符串/数组/对象 | `find()`, `first()`, `findWithFallback()` |
+
+---
+
+## 二、Document 类完整方法参考
+
+### 2.1 构造与文档类型常量
+
+**`Document::TYPE_HTML`** = `'html'` — HTML 文档类型（默认）
+**`Document::TYPE_XML`** = `'xml'` — XML 文档类型
+
+#### `__construct(DOMDocument|string|null $string = null, bool $isFile = false, string $encoding = 'UTF-8', string $type = self::TYPE_HTML)`
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 | 可选值/示例 |
+|------|------|------|-------|------|------------|
+| `$string` | `DOMDocument|string|null` | 否 | `null` | DOM文档对象、HTML/XML字符串、文件路径或URL | `'<div>内容</div>'`, `'https://example.com'`, `null`（创建空文档） |
+| `$isFile` | `bool` | 否 | `false` | `$string` 是否为文件/URL路径 | `true`: 从文件加载；`false`: 从字符串加载 |
+| `$encoding` | `string` | 否 | `'UTF-8'` | 文档编码 | `'UTF-8'`, `'GBK'`, `'ISO-8859-1'` |
+| `$type` | `string` | 否 | `self::TYPE_HTML` | 文档类型 | `Document::TYPE_HTML`, `Document::TYPE_XML` |
+
+**使用场景**：创建 Document 实例，支持 HTML 字符串、XML 字符串、本地文件、远程 URL 四种来源。
+
+```php
+// 从 HTML 字符串创建
+$doc = new Document('<html><body><p>Hello</p></body></html>');
+// 从 URL 加载
+$doc = new Document('https://example.com', true);
+// 从 XML 文件加载
+$doc = new Document('data.xml', true, 'UTF-8', Document::TYPE_XML);
+// 创建空文档
+$doc = new Document();
+```
+
+#### `create(DOMDocument|string|null $string = null, bool $isFile = false, string $encoding = 'UTF-8', string $type = self::TYPE_HTML): self`
+
+静态工厂方法，参数与构造函数完全一致。推荐在链式调用开头使用。
+
+```php
+$doc = Document::create($html)->find('.item');
+```
+
+#### `getFromDomDocument(DOMDocument $domDocument): ?self`
+
+从原生 PHP `DOMDocument` 对象获取 Document 包装实例。
+
+### 2.2 文档加载与保存
+
+#### `load(string $string, bool $isFile = false, ?string $type = null): self`
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 | 可选值 |
+|------|------|------|-------|------|--------|
+| `$string` | `string` | 是 | — | HTML/XML 内容、文件路径或 URL | 任意字符串 |
+| `$isFile` | `bool` | 否 | `false` | 是否从文件/URL加载 | `true`, `false` |
+| `$type` | `?string` | 否 | `null` | 文档类型，null 自动检测 | `Document::TYPE_HTML`, `Document::TYPE_XML`, `null` |
+
+**@throws** `RuntimeException` 当加载失败时抛出
+
+```php
+$doc->load($html);                   // 从字符串加载
+$doc->load('file.html', true);       // 从文件加载
+$doc->load('https://...', true);     // 从远程URL加载
+```
+
+#### `loadHtml(string $html): self`
+加载 HTML 内容（便捷方法）。自动设置 LIBXML 选项。
+
+#### `loadXml(string $xml): self`
+加载 XML 内容（便捷方法）。
+
+#### `save(string $filename): self`
+保存文档到文件。@throws RuntimeException 当保存失败时抛出。
+
+#### `toString(): string`
+获取文档的完整 HTML/XML 字符串内容。
+
+---
+
+### 2.3 基础查找方法
+
+#### `find(string $expression, string $type = Query::TYPE_CSS, ?DOMElement $contextNode = null): array`
+
+**返回值**: `array<int, Element|string|array>` — 匹配的元素数组或提取的结构化数据
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$expression` | `string` | 是 | — | 选择器表达式 |
+| `$type` | `string` | 否 | `Query::TYPE_CSS` | 选择器类型 |
+| `$contextNode` | `?DOMElement` | 否 | `null` | 上下文节点，在此节点下搜索 |
+
+**`$type` 所有可配置项及说明**：
+
+| type 值 | 返回类型 | 内部处理 | 使用示例 | 说明 |
+|---------|---------|---------|---------|------|
+| `css` | `Element[]` | CSS→XPath 转换后查找 | `$doc->find('div.item')` | CSS 选择器 |
+| `xpath` | `Element[]` | 直接执行 XPath 查询 | `$doc->find('//div[@class="item"]', 'xpath')` | XPath 表达式 |
+| `regex` | `Element[]` | `findByRegex()` 按正则匹配元素 | `$doc->find('/\d+/', 'regex')` | 正则匹配元素文本/属性 |
+| `table` | `array[]` | 转发至 `extractTable()` | `$doc->find('table.data', 'table')` | 提取结构化表格数据 |
+| `list` | `array[]` | 转发至 `extractList()` | `$doc->find('ul.list', 'list')` | 提取列表项数据 |
+| `form` | `array` | 转发至 `extractFormData()` | `$doc->find('form#login', 'form')` | 提取表单字段数据 |
+| `link` | `array[]` | 转发至 `extractLinks()` | `$doc->find('a.link', 'link')` | 提取链接数据 |
+| `image` | `array[]` | 转发至 `extractImages()` | `$doc->find('img.thumb', 'image')` | 提取图片数据 |
+| `text` | `string[]` | 查找元素后提取 `->text()` | `$doc->find('p', 'text')` | 提取元素纯文本 |
+| `json` | `array` | 解析文档内容为 JSON | `$doc->find('', 'json')` | JSON 数据解析 |
+
+**特殊语法支持**：
+- `::text` 伪元素：`$doc->find('div::text')` — 返回元素的纯文本数组
+- `::attr(name)` 伪元素：`$doc->find('a::attr(href)')` — 返回元素的指定属性值数组
+
+#### `first(string $expression, string $type = Query::TYPE_CSS, ?DOMElement $contextNode = null): Element|string|array|null`
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$expression` | `string` | 是 | — | 选择器表达式 |
+| `$type` | `string` | 否 | `Query::TYPE_CSS` | 选择器类型（同 `find()`） |
+| `$contextNode` | `?DOMElement` | 否 | `null` | 上下文节点 |
+
+**返回值类型说明**：
+- css/xpath/regex 类型：返回 `?Element`（第一个匹配的元素）
+- table/list/form/link/image/text/json 类型：返回第一个提取结果（`string|array|null`）
+
+```php
+$el = $doc->first('div.item');                        // ?Element
+$tableRow = $doc->first('table', 'table');               // array|null
+$listItem = $doc->first('ul', 'list');                   // array|null
+$formData = $doc->first('form', 'form');                 // array|null
+$text = $doc->first('p', 'text');                        // string|null
+```
+
+#### `has(string $selector): bool`
+检查文档中是否存在匹配指定选择器的元素。
+
+#### `count(string $selector): int`
+返回匹配指定选择器的元素数量。
+
+#### `findLast(string $selector): ?Element`
+查找匹配选择器的所有元素中的最后一个元素。
+
+```php
+$lastItem = $doc->findLast('.item');
+```
+
+#### `findByIndex(string $selector, int $index): ?Element`
+查找匹配选择器的元素集合中指定索引位置的元素。索引从0开始，负数表示从后往前计数（-1表示最后一个）。
+
+```php
+$third = $doc->findByIndex('.item', 2);   // 第三个元素
+$last = $doc->findByIndex('.item', -1);    // 最后一个元素
+```
+
+#### `findByRange(string $selector, int $start, int $end): array`
+查找匹配选择器的元素集合中指定索引范围内的元素（包含 end）。索引从0开始。
+
+```php
+$items = $doc->findByRange('.item', 0, 5);  // 第1到第6个元素
+```
+
+---
+
+### 2.4 XPath 相关方法
+
+#### `xpath(string $xpathExpression): array`
+**返回值**: `array<int, Element>` — 匹配的元素数组
+
+使用 XPath 1.0 语法查询元素。支持：
+- 路径表达式：`/`（绝对路径）、`//`（相对路径）、`..`（父节点）
+- 轴：`child`、`descendant`、`parent`、`ancestor`、`following-sibling`、`preceding-sibling`、`ancestor-or-self`、`descendant-or-self`
+- 函数：`text()`、`comment()`、`normalize-space()`、`contains()`、`starts-with()`、`ends-with()`、`substring()`、`string-length()`、`number()`、`sum()`、`count()`
+- 节点测试：`node()`、`text()`、`comment()`、`element()`
+- 布尔函数：`true()`、`false()`、`not()`、`and`、`or`
+- 位置函数：`position()`、`last()`
+
+```php
+$elements = $doc->xpath('//div[@class="container"]');
+$texts = $doc->xpath('//div[@class="content"]/text()');
+$first = $doc->xpath('(//div[@class="item"])[1]');
+```
+
+#### `xpathFirst(string $xpathExpression): ?Element`
+使用 XPath 查询第一个匹配的元素。
+
+#### `xpathTexts(string $xpathExpression): array`
+使用 XPath 查询文本节点并返回文本数组。
+
+```php
+$texts = $doc->xpathTexts('//p/text()');
+```
+
+#### `xpathAttrs(string $xpathExpression, string $attribute): array`
+使用 XPath 查询元素并提取指定属性值。
+
+```php
+$hrefs = $doc->xpathAttrs('//a', 'href');
+```
+
+---
+
+### 2.5 正则表达式方法
+
+#### `regex(string $pattern, ?DOMElement $contextNode = null, ?string $attribute = null): array`
+**返回值**: `array<int, Element>` — 匹配的元素数组
+
+使用正则表达式匹配元素的文本内容或属性值。
+
+```php
+// 匹配文本内容
+$elements = $doc->regex('/\d{4}-\d{2}-\d{2}/');
+// 匹配 href 属性值
+$links = $doc->regex('/^https:\/\//', null, 'href');
+```
+
+#### `regexFind(string $pattern, ?DOMElement $contextNode = null, ?string $attribute = null): array`
+`regex()` 的别名方法。
+
+#### `regexFirst(string $pattern, ?DOMElement $contextNode = null, ?string $attribute = null): ?Element`
+使用正则表达式查找第一个匹配的元素。
+
+#### `regexMatch(string $pattern, ?DOMElement $contextNode = null, ?string $attribute = null): array`
+**返回值**: `array<int, string|array>` — 匹配的文本数组或分组数组
+
+使用正则表达式查找元素并提取所有匹配的文本，支持分组捕获。
+
+```php
+// 提取日期
+$dates = $doc->regexMatch('/\d{4}-\d{2}-\d{2}/');
+// 提取分组数据（姓名和年龄）
+$data = $doc->regexMatch('/(\w+)\s*[:：]\s*(\d+)/');
+// 从属性中匹配
+$urls = $doc->regexMatch('/^https:\/\//', null, 'href');
+```
+
+#### `regexMatchWithElement(string $pattern, ?DOMElement $contextNode = null, ?string $attribute = null): array`
+**返回值**: `array<int, array{element: Element, matches: array<string>}>` — 包含元素对象的匹配结果
+
+```php
+$results = $doc->regexMatchWithElement('/\d{4}-\d{2}-\d{2}/');
+foreach ($results as $result) {
+    echo $result['element']->tagName() . ': ' . $result['matches'][0] . "\n";
+}
+```
+
+#### `regexMulti(array $patterns, ?DOMElement $contextNode = null, ?string $attribute = null): array`
+**返回值**: `array<string, array<int, string>>` — 按模式名称索引的多列匹配结果
+
+使用多个正则表达式同时查找元素。
+
+```php
+$results = $doc->regexMulti([
+    'dates' => '/\d{4}-\d{2}-\d{2}/',
+    'emails' => '/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/',
+]);
+```
+
+#### `regexReplace(string $pattern, string $replacement, ?DOMElement $contextNode = null, ?string $attribute = null): self`
+使用正则表达式替换元素文本内容或属性值。
+
+```php
+$doc->regexReplace('/\d+/', '***');                    // 替换文本中的数字
+$doc->regexReplace('/^http:/', 'https:', null, 'href'); // 替换 href 属性
+```
+
+---
+
+### 2.6 数据提取方法
+
+#### `text(string $selector = '*'): string|Element|null`
+查找匹配选择器的第一个元素的文本内容。如果选择器包含 `::text` 或 `::attr()`，返回对应的文本/属性值。
+
+```php
+$text = $doc->text('h1');                  // 第一个 h1 的文本
+$href = $doc->text('a::attr(href)');       // 第一个 a 的 href 属性
+$text = $doc->text();                       // 文档正文文本
+```
+
+#### `html(?string $selector = null): string`
+获取文档或匹配选择器的第一个元素的 HTML 内容。
+
+#### `texts(string $selector = '*'): array`
+获取所有匹配元素的文本内容数组。
+
+#### `allTexts(): array`
+获取文档中所有元素的文本内容数组。
+
+#### `allTextNodes(): array`
+获取文档中所有文本节点（DOMText）的文本内容数组。
+
+#### `directText(string $selector = '*'): string`
+获取匹配元素的直接文本内容（不包含子元素的文本）。
+
+#### `attrs(string $selector = '*'): array`
+获取所有匹配元素的属性数组。
+
+#### `extractAttributes(string $selector, array $attrNames = []): array`
+从匹配选择器的元素中提取指定属性。
+
+```php
+$attrs = $doc->extractAttributes('a', ['href', 'title']);
+// 返回: [['href' => '...', 'title' => '...'], ...]
+```
+
+#### `extractTexts(string $selector, bool $trim = true): array`
+从匹配选择器的元素中提取文本内容。
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$selector` | `string` | 是 | — | CSS 选择器 |
+| `$trim` | `bool` | 否 | `true` | 是否修剪空白字符 |
+
+```php
+$texts = $doc->extractTexts('div.item');
+$texts = $doc->extractTexts('p', false);  // 不修剪空白
+```
+
+#### `json(): array`
+将文档内容解析为 JSON 数组。适用于 API 响应的数据提取。
+
+#### `xml(): string`
+获取文档 XML 格式的内容。
+
+---
+
+### 2.7 文本查找方法（findBy*）
+
+#### `findByText(string $text, string $selector = '*'): array`
+查找包含指定文本的元素。
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$text` | `string` | 是 | — | 要查找的文本（区分大小写） |
+| `$selector` | `string` | 否 | `'*'` | CSS 选择器（用于限制查找范围） |
+
+```php
+$elements = $doc->findByText('Hello');
+$elements = $doc->findByText('内容', '.content');
+```
+
+#### `findByTextIgnoreCase(string $text, string $selector = '*'): array`
+查找包含指定文本的元素（不区分大小写）。
+
+#### `findFirstByText(string $text, string $selector = '*'): ?Element`
+查找包含指定文本的第一个元素。
+
+#### `findFirstByTextIgnoreCase(string $text, string $selector = '*'): ?Element`
+查找包含指定文本（不区分大小写）的第一个元素。
+
+#### `findByHtml(string $html, string $selector = '*'): array`
+查找包含指定 HTML 内容的元素。
+
+#### `findFirstByHtml(string $html, string $selector = '*'): ?Element`
+查找包含指定 HTML 内容的第一个元素。
+
+---
+
+### 2.8 属性查找方法（findByAttribute*）
+
+#### `findByAttribute(string $attribute, ?string $value = null, string $selector = '*'): array`
+查找具有指定属性的元素。
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$attribute` | `string` | 是 | — | 属性名 |
+| `$value` | `?string` | 否 | `null` | 属性值，null 表示只检查属性存在 |
+| `$selector` | `string` | 否 | `'*'` | CSS 选择器限定范围 |
+
+```php
+$elements = $doc->findByAttribute('href');                   // 所有有 href 的元素
+$elements = $doc->findByAttribute('class', 'active');        // class="active"
+$elements = $doc->findByAttribute('data-id', '123', 'div');  // div[data-id="123"]
+```
+
+#### `findByAttributeContains(string $attribute, string $value, string $selector = '*'): array`
+查找属性值包含指定字符串的元素。
+
+```php
+$elements = $doc->findByAttributeContains('class', 'nav');
+// 相当于 CSS: [class*="nav"]
+```
+
+#### `findByAttributeStartsWith(string $attribute, string $value, string $selector = '*'): array`
+查找属性值以指定字符串开头的元素。
+
+```php
+$elements = $doc->findByAttributeStartsWith('src', 'https');
+// 相当于 CSS: [src^="https"]
+```
+
+#### `findByAttributeEndsWith(string $attribute, string $value, string $selector = '*'): array`
+查找属性值以指定字符串结尾的元素。
+
+```php
+$elements = $doc->findByAttributeEndsWith('src', '.jpg');
+// 相当于 CSS: [src$=".jpg"]
+```
+
+以上四个方法均有对应的 `findFirst*` 变体：
+- `findFirstByAttribute(string $attribute, ?string $value = null, string $selector = '*'): ?Element`
+- `findFirstByAttributeContains(string $attribute, string $value, string $selector = '*'): ?Element`
+- `findFirstByAttributeStartsWith(string $attribute, string $value, string $selector = '*'): ?Element`
+- `findFirstByAttributeEndsWith(string $attribute, string $value, string $selector = '*'): ?Element`
+
+---
+
+### 2.9 Data 属性查找方法（findByData*）
+
+专门处理 HTML5 `data-*` 属性。
+
+#### `findByData(string $dataName, ?string $value = null, string $selector = '*'): array`
+查找包含指定 data-* 属性的元素。
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$dataName` | `string` | 是 | — | data属性名（不包含 data- 前缀） |
+| `$value` | `?string` | 否 | `null` | 属性值，null 只检查属性存在 |
+| `$selector` | `string` | 否 | `'*'` | CSS 选择器限定范围 |
+
+```php
+$elements = $doc->findByData('id');            // 所有有 data-id 的元素
+$elements = $doc->findByData('id', '123');     // data-id="123"
+$elements = $doc->findByData('user', 'admin', 'div'); // div[data-user="admin"]
+```
+
+#### `findByDataContains(string $dataName, string $value, string $selector = '*'): array`
+查找 data-* 属性值包含指定字符串的元素。
+
+#### `findByDataStartsWith(string $dataName, string $value, string $selector = '*'): array`
+查找 data-* 属性值以指定字符串开头的元素。
+
+#### `findByDataEndsWith(string $dataName, string $value, string $selector = '*'): array`
+查找 data-* 属性值以指定字符串结尾的元素。
+
+---
+
+### 2.10 表格提取方法（extractTable*）
+
+#### `extractTable(string|Element|null $table = null, array $options = []): array`
+
+核心表格数据提取方法。
+
+**`$table` 参数所有可配置值**：
+
+| 传入值 | 类型 | 说明 | 示例 |
+|--------|------|------|------|
+| `null` | `null` | 提取文档中所有 `<table>` 元素 | `$doc->extractTable()` |
+| CSS选择器 | `string` | 使用 CSS 选择器匹配表格 | `$doc->extractTable('table.data')` |
+| XPath | `string` | 使用 XPath 定位表格 | `$doc->extractTable('//table[@id="t1"]')` |
+| 正则表达式 | `string` | 从 HTML 中正则匹配表格 | `$doc->extractTable('/(<table[^>]*>.*?<\/table>)/is')` |
+| Element 对象 | `Element` | 直接传入已找到的表格元素 | `$doc->extractTable($tableElement)` |
+
+**`$options` 所有参数完整枚举**：
+
+| 参数名 | 类型 | 默认值 | 所有可配置值 | 说明 | 适用场景 |
+|--------|------|--------|-------------|------|---------|
+| `selectorType` | `string` | `'auto'` | `'auto'`、`'css'`、`'xpath'`、`'regex'` | 选择器类型，`auto` 自动检测 | 当选择器格式不明确时手动指定 |
+| `headerRow` | `int` | `0` | `0`, `1`, `2`, ... | 表头行索引（0-based） | 表头不在第一行时使用 |
+| `skipRows` | `int` | `0` | `0`, `1`, `2`, ... | 跳过的行数（从表格开始） | 表格前几行是标题或注释时 |
+| `includeHeader` | `bool` | `true` | `true`、`false` | 是否提取表头 | 只需要数据行时设为 false |
+| `includeHeaderAsFirstRow` | `bool` | `false` | `true`、`false` | 是否将表头作为第一行返回 | indexed 格式时需要表头行时 |
+| `trimText` | `bool` | `true` | `true`、`false` | 是否修剪单元格文本空白 | 需要保留原始格式时设为 false |
+| `removeEmpty` | `bool` | `true` | `true`、`false` | 是否移除空行 | 需要保留空行结构时设为 false |
+| `cellSelector` | `string` | `'td, th'` | `'td'`、`'th'`、`'td, th'` 等 | 单元格选择器 | 自定义表格结构时指定 |
+| `rowSelector` | `string` | `'tr'` | `'tr'`、`'.row'` 等 | 行选择器 | 非标准表格时使用 |
+| `returnFormat` | `string` | `'structured'` | `'structured'`、`'associative'`、`'indexed'`、`'both'` | 返回数据格式 | 根据下游处理需求选择 |
+| `preserveStructure` | `bool` | `true` | `true`、`false` | 是否保留 thead/tbody/tfoot 结构 | 需要原始表格结构时默认 true |
+| `returnAllTables` | `bool` | `true` | `true`、`false` | 是否返回所有匹配的表格 | 只处理第一个表格时设为 false |
+| `tableIndex` | `int|null` | `null` | `null`、`0`、`1`、`2`... | 指定返回第几个表格 | 多表格时只取特定表格 |
+
+**`returnFormat` 返回格式详解**：
+
+| 格式值 | 返回结构 | 示例 |
+|--------|---------|------|
+| `'structured'`（默认） | `[['thead' => [...], 'tbody' => [[...], ...], 'tfoot' => [...]]]` | 保留完整的表格结构 |
+| `'associative'` | `[[col1 => val1, col2 => val2], ...]` | 表头作为键的关联数组 |
+| `'indexed'` | `[[val1, val2], ...]` | 纯索引数组 |
+| `'both'` | `['headers' => [...], 'rows' => [[...], ...]]` | 同时返回表头和行 |
+
+```php
+// 结构化格式（默认）
+$data = $doc->extractTable('table');
+// [['thead' => ['姓名', '年龄'], 'tbody' => [['张三', '30'], ['李四', '25']]]]
+
+// 关联数组格式
+$data = $doc->extractTable('table', ['returnFormat' => 'associative']);
+// [['姓名' => '张三', '年龄' => '30'], ['姓名' => '李四', '年龄' => '25']]
+
+// 索引格式
+$data = $doc->extractTable('table', ['returnFormat' => 'indexed']);
+// [['张三', '30'], ['李四', '25']]
+
+// 同时返回
+$data = $doc->extractTable('table', ['returnFormat' => 'both']);
+// ['headers' => ['姓名', '年龄'], 'rows' => [['张三', '30'], ['李四', '25']]]
+```
+
+#### `extractTableBySelector(string $selector, array $options = []): array`
+通过 CSS 选择器查找并提取表格。等同于 `extractTable($selector, $options)`。
+
+#### `extractTableByAttribute(string $attr, ?string $value = null, array $options = []): array`
+通过属性查找并提取表格。
+
+```php
+$data = $doc->extractTableByAttribute('data-type', 'user-list');
+// 相当于 CSS: table[data-type="user-list"]
+```
+
+#### `extractTableByClass(string $className, array $options = []): array`
+通过类名查找并提取表格。
+
+```php
+$data = $doc->extractTableByClass('data-table');
+// 相当于 CSS: table.data-table
+```
+
+#### `extractTableById(string $id, array $options = []): array`
+通过 ID 查找并提取表格。
+
+```php
+$data = $doc->extractTableById('myTable');
+// 相当于 CSS: table#myTable
+```
+
+#### `extractTableByText(string $text, array $options = []): array`
+提取包含指定文本的表格。
+
+```php
+$data = $doc->extractTableByText('销售报表');
+// 相当于 CSS: table:contains(销售报表)
+```
+
+#### `extractTableByColumn(string $column, array $options = []): array`
+提取包含指定列的表格。
+
+| 参数 | 类型 | 必需 | 说明 | 示例 |
+|------|------|------|------|------|
+| `$column` | `string|int` | 是 | 列名或列索引 | `'姓名'` 或 `0` |
+
+```php
+// 通过列名查找
+$tables = $doc->extractTableByColumn('姓名');
+// 通过列索引查找
+$tables = $doc->extractTableByColumn(0);
+```
+
+#### `extractAllTables(array $options = []): array`
+提取文档中所有表格。等同于 `extractTable(null, $options)`。
+
+---
+
+### 2.11 列表提取方法
+
+#### `extractList(string|Element|null $list = null, array $options = []): array`
+
+**`$list` 参数所有可配置值**：
+
+| 传入值 | 类型 | 说明 | 示例 |
+|--------|------|------|------|
+| `null` | `null` | 提取第一个列表（ul 或 ol） | `$doc->extractList()` |
+| CSS选择器 | `string` | 使用 CSS 选择器匹配列表 | `$doc->extractList('ul.products')` |
+| Element 对象 | `Element` | 直接传入列表元素 | `$doc->extractList($listElement)` |
+
+**`$options` 所有参数完整枚举**：
+
+| 参数名 | 类型 | 默认值 | 所有可配置值 | 说明 | 适用场景 |
+|--------|------|--------|-------------|------|---------|
+| `recursive` | `bool` | `false` | `true`、`false` | 是否递归提取嵌套列表 | 处理多级菜单/分类时设为 true |
+| `trimText` | `bool` | `true` | `true`、`false` | 是否修剪文本空白 | 需要保留缩进时设为 false |
+| `includeIndex` | `bool` | `false` | `true`、`false` | 是否包含索引 | 有序列表需要序号时设为 true |
+
+```php
+// 基本提取
+$items = $doc->extractList('ul.menu');
+// 返回: ['首页', '关于', '联系']
+
+// 递归提取嵌套列表
+$items = $doc->extractList('ul.category', ['recursive' => true]);
+// 返回: ['电子产品', ['手机', '电脑'], '家居用品', ...]
+
+// 带索引
+$items = $doc->extractList('ol.steps', ['includeIndex' => true]);
+// 返回: [[1 => '步骤一'], [2 => '步骤二'], ...]
+```
+
+#### `extractAllLists(array $options = []): array`
+提取文档中所有列表数据。
+
+#### `extractDefinitionList(?string $selector = null): array`
+提取定义列表（`<dl>`）数据，返回 `[['term' => '...', 'definition' => '...'], ...]` 格式。
+
+```php
+$data = $doc->extractDefinitionList('dl.glossary');
+// 返回: [['term' => 'HTML', 'definition' => '超文本标记语言'], ...]
+```
+
+---
+
+### 2.12 表单、链接、图片提取方法
+
+#### `extractFormData(string|Element|null $form = null): array`
+提取表单字段数据。
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$form` | `string|Element|null` | 否 | `null` | 表单选择器、Element 对象或 null |
+
+```php
+$fields = $doc->extractFormData('form#login');
+// 返回: ['username' => 'admin', 'password' => '***', ...]
+```
+
+**提取规则**：
+- `<input>`: 提取 type/text/email/password/hidden/checkbox(选中)/radio(选中) 的 name 和 value
+- `<textarea>`: 提取 name 和文本内容
+- `<select>`: 提取 name 和选中的 option 的 value
+- `<button>`: 提取 name 和 value
+
+#### `links(string $selector = 'a[href]'): array`
+获取文档中所有链接数据（便捷方法）。
+
+**返回值**: `array<int, array{href: string, text: string, title: string|null}>`
+
+```php
+$allLinks = $doc->links();
+foreach ($allLinks as $link) {
+    echo $link['text'] . ' -> ' . $link['href'];
+}
+```
+
+#### `extractLinks(string $selector = 'a'): array`
+提取链接数据，可自定义选择器。
+
+```php
+$externalLinks = $doc->extractLinks('a.external');
+$navLinks = $doc->extractLinks('nav a');
+```
+
+#### `images(string $selector = 'img[src]'): array`
+获取文档中所有图片数据（便捷方法）。
+
+**返回值**: `array<int, array{src: string, alt: string, title: string|null}>`
+
+```php
+$allImages = $doc->images();
+```
+
+#### `extractImages(string $selector = 'img'): array`
+提取图片数据，可自定义选择器。
+
+```php
+$thumbnails = $doc->extractImages('img.thumbnail');
+```
+
+#### `forms(string $selector = 'form'): array`
+获取文档中所有表单的简要信息。
+
+#### `inputs(string $selector = 'input, select, textarea'): array`
+获取文档中所有输入元素的信息。
+
+---
+
+### 2.13 元素操作方法
+
+#### `setAttr(string $selector, string $name, string $value): self`
+设置匹配元素的属性。
+
+```php
+$doc->setAttr('a', 'target', '_blank');
+```
+
+#### `attr(string $selector, string $name, ?string $value = null): self|?string`
+获取或设置匹配元素的属性。作为 getter 使用时只处理第一个匹配元素。
+
+```php
+$href = $doc->attr('a', 'href');      // 获取
+$doc->attr('a', 'href', 'https://');  // 设置
+```
+
+#### `removeAttr(string $selector, string $name): self`
+移除匹配元素的属性。
+
+```php
+$doc->removeAttr('a', 'target');
+```
+
+#### `addClass(string $selector, string ...$classNames): self`
+为匹配元素添加类名。
+
+```php
+$doc->addClass('.item', 'active', 'highlight');
+```
+
+#### `removeClass(string $selector, string ...$classNames): self`
+移除匹配元素的类名。
+
+```php
+$doc->removeClass('.item', 'active');
+```
+
+#### `toggleClass(string $selector, string $className): self`
+切换匹配元素的类名（有则移除，无则添加）。
+
+#### `hasClass(string $selector, string $className): bool`
+检查匹配元素是否存在指定类名（只检查第一个匹配元素）。
+
+#### `setContent(string $selector, string $content): self`
+设置匹配元素的内容（HTML）。如果有 `::text` 后缀则设置纯文本。
+
+```php
+$doc->setContent('.item', '<span>新内容</span>');
+$doc->setContent('.item::text', '纯文本内容');
+```
+
+---
+
+### 2.14 元素创建方法
+
+#### `createElement(string $tagName, ?string $value = null, array $attributes = []): Element`
+创建新的元素。
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$tagName` | `string` | 是 | — | 标签名 |
+| `$value` | `?string` | 否 | `null` | 元素值 |
+| `$attributes` | `array` | 否 | `[]` | 属性数组，`['class' => 'active', 'id' => 'main']` |
+
+```php
+$newEl = $doc->createElement('div', '内容', ['class' => 'box', 'id' => 'box1']);
+```
+
+#### `createElementBySelector(string $selector, ?string $value = null, array $attributes = []): Element`
+使用 CSS 选择器语法创建元素。
+
+```php
+$el = $doc->createElementBySelector('div.container > p.active');
+$el = $doc->createElementBySelector('div#main.active', '内容');
+```
+
+#### `createTextNode(string $content): Element`
+创建文本节点。
+
+#### `createDocumentFragment(): DocumentFragment`
+创建文档片段对象。
+
+#### `createFragment(string $html): DocumentFragment`
+从 HTML 字符串创建文档片段。
+
+```php
+$fragment = $doc->createFragment('<div>新内容</div>');
+$doc->first('.container')->append($fragment);
+```
+
+---
+
+### 2.15 文档结构方法
+
+#### `root(): ?Element`
+获取文档根元素（`<html>`）。
+
+#### `head(): ?Element`
+获取文档 `<head>` 元素。
+
+#### `body(): ?Element`
+获取文档 `<body>` 元素。
+
+#### `title(): ?string`
+获取页面标题（`<title>` 标签文本）。
+
+#### `setTitle(string $title): self`
+设置页面标题。
+
+#### `getDocument(): DOMDocument`
+获取原生 PHP DOMDocument 对象。
+
+#### `getType(): string`
+获取文档类型（`html` 或 `xml`）。
+
+#### `getEncoding(): string`
+获取文档编码。
+
+#### `extractMetaData(string ...$names): array`
+提取 `<meta>` 标签数据。
+
+```php
+$meta = $doc->extractMetaData('description', 'keywords');
+// 返回: ['description' => '...', 'keywords' => '...']
+```
+
+---
+
+### 2.16 辅助和调试方法
+
+#### `preserveWhiteSpace(bool $preserve = true): self`
+设置是否保留空白字符。
+
+#### `format(bool $format = true): self`
+设置是否格式化输出。
+
+#### `clear(): self`
+清空文档内容。
+
+#### `getDebugInfo(): array`
+获取文档调试信息，包括元素数量、选择器缓存状态等。
+
+#### `getStatistics(): array`
+获取文档统计信息，包括各类元素数量。
+
+#### `isValid(): bool`
+检查文档是否有效（正确加载）。
+
+---
+
+### 2.17 回退查找方法
+
+#### `findWithFallback(array $selectors, ?DOMElement $contextNode = null, ?bool $getFirst = true): array`
+
+完整的参数文档已在本章前面部分提供，此处补充「返回数据结构的完整说明」：
+
+**`$getFirst` 参数行为**：
+
+| `$getFirst` | 行为 | 返回结构 |
+|-------------|------|---------|
+| `true`（默认） | 找到第一个非空结果立即返回 | 一维数组：该选择器的查询结果 |
+| `false` | 遍历所有选择器，收集所有结果 | 二维数组：每个元素是一个选择器的结果 |
+
+```php
+// 默认模式 - 找到即返回
+$result = $doc->findWithFallback([
+    ['selector' => 'h1.title'],
+    ['selector' => 'h2.subtitle'],
+]);
+// 返回: [Element1, Element2, ...] (一维)
+
+// 收集模式 - 收集所有结果
+$result = $doc->findWithFallback([...], null, false);
+// 返回: [[结果1], [结果2], ...] (每个选择器对应一个结果数组)
+```
+
+#### `findFirstWithFallback(array $selectors, ?DOMElement $contextNode = null): Element|string|array|null`
+
+返回第一个匹配选择器的结果，类型取决于选择器类型：
+- css/xpath/regex: 返回 `?Element`
+- table: 返回 `?array`（结构化表格数据）
+- list: 返回 `?array`（列表数据数组）
+- form: 返回 `?array`（表单字段关联数组）
+- link/image: 返回 `?array`（链接/图片信息数组）
+- text: 返回 `?string`
+- json: 返回 `?array`
+
+#### `queryWithFallback(array $selectors, ?DOMElement $contextNode = null): array`
+
+`findWithFallback()` 的 `$getFirst=false` 模式便捷调用。收集所有选择器的结果。
+
+---
+
+### 2.18 findByPath 路径查找
+
+#### `findByPath(string $path, bool $relative = false): array`
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$path` | `string` | 是 | — | 元素路径（CSS选择器或XPath表达式） |
+| `$relative` | `bool` | 否 | `false` | 是否为相对路径 |
+
+**支持的路径格式**：
+
+| 格式 | 示例 | 说明 |
+|------|------|------|
+| XPath 绝对路径 | `/html/body/div[1]` | 从根元素开始的精确路径 |
+| XPath 相对路径 | `//div[@class="item"]/span` | 任意位置开始的路径 |
+| CSS 选择器路径 | `div.content > div.pages-date > span` | CSS 组合选择器 |
+| 混合路径 | `div.container/div[@class="item"]/a` | CSS 与 XPath 混合使用 |
+
+```php
+$elements = $doc->findByPath('/html/body/div[3]/div[1]/div/div[1]/span');
+$elements = $doc->findByPath('//div[@class="item"]/span');
+$elements = $doc->findByPath('div.content > div.pages-date > span');
+$elements = $doc->findByPath('div.container/div[@class="item"]/a');
+```
+
+---
+
+### 2.19 queryMatrix 矩阵数据提取
+
+#### `queryMatrix(string|Element $container = 'div', array $options = []): array`
+
+提取类似表格但非 `<table>` 标签的矩阵型数据。
+
+**`$options` 所有参数完整枚举**：
+
+| 参数名 | 类型 | 默认值 | 所有可配置值 | 说明 | 适用场景 |
+|--------|------|--------|-------------|------|---------|
+| `rowSelector` | `string|null` | `null` | `null`、任意CSS选择器 | 行选择器，null 表示使用直接子元素 | 非直接子元素的行结构时指定 |
+| `cellSelector` | `string|null` | `null` | `null`、任意CSS选择器 | 单元格选择器，null 表示使用直接子元素 | 非直接子元素的单元格时指定 |
+| `trimText` | `bool` | `true` | `true`、`false` | 是否修剪文本空白 | 保留原始格式时设为 false |
+| `removeEmpty` | `bool` | `true` | `true`、`false` | 是否移除空行和空单元格 | 保留结构空位时设为 false |
+| `selectorType` | `string` | `'auto'` | `'auto'`、`'css'`、`'xpath'`、`'regex'` | 选择器类型 | 非 CSS 选择器时手动指定 |
+
+```php
+// HTML:
+// <div class="matrix">
+//   <div class="row"><div class="cell">A1</div><div class="cell">A2</div></div>
+//   <div class="row"><div class="cell">B1</div><div class="cell">B2</div></div>
+// </div>
+
+$data = $doc->queryMatrix('.matrix', [
+    'rowSelector' => '.row',
+    'cellSelector' => '.cell',
+]);
+// 返回: [['A1', 'A2'], ['B1', 'B2']]
+```
+
+---
+
+## 三、Element 类完整方法参考
+
+### 3.1 构造和创建方法
+
+#### `__construct(DOMElement|DOMText|DOMComment|DOMCdataSection|string $tagName, string|int|float|null $value = null, array $attributes = [])`
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 | 示例 |
+|------|------|------|-------|------|------|
+| `$tagName` | `mixed` | 是 | — | 标签名字符串或 DOMNode 对象 | `'div'`, `$domElement` |
+| `$value` | `mixed` | 否 | `null` | 元素值 | `'内容'`, `123`, `null` |
+| `$attributes` | `array` | 否 | `[]` | 属性数组 | `['class' => 'box', 'id' => 'main']` |
+
+#### `create($name, $value = null, array $attributes = []): self`
+静态工厂方法。
+
+#### `createBySelector(string $selector, ?string $value = null, array $attributes = []): self`
+使用 CSS 选择器创建元素。
+
+### 3.2 查找方法
+
+#### `find(string $selector, string $type = Query::TYPE_CSS): array`
+在当前元素的后代中查找匹配选择器的元素。类型支持同 Document::find()。
+
+#### `first(string $selector, string $type = Query::TYPE_CSS): ?Element`
+查找当前元素后代中第一个匹配的元素。
+
+#### `matches(string $selector, string|bool $typeOrStrict = false): bool`
+检查当前元素是否匹配指定选择器。
+
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|-------|------|
+| `$selector` | `string` | 是 | — | CSS 选择器 |
+| `$typeOrStrict` | `string|bool` | 否 | `false` | 选择器类型或严格模式 |
+
+```php
+if ($element->matches('.active')) { ... }
+if ($element->matches('div.item', true)) { ... }  // 严格模式
+```
+
+#### `findChildren(string $selector = '*'): array`
+查找直接子元素（只查找第一代子元素）。
+
+#### `findFirstChild(string $selector = '*'): ?Element`
+查找第一个匹配的直接子元素。
+
+### 3.3 XPath 和正则表达式方法
+
+- `xpath(string $xpathExpression): array` — 使用 XPath 查询后代元素
+- `regex(string $pattern, ?string $attribute = null): array` — 正则查找
+- `regexMatch(string $pattern, ?string $attribute = null): array` — 正则匹配提取文本
+- `regexMatchWithElement(string $pattern, ?string $attribute = null): array` — 正则匹配（含元素）
+- `regexMulti(array $patterns, ?string $attribute = null): array` — 多正则匹配
+- `regexReplace(string $pattern, string $replacement, ?string $attribute = null): self` — 正则替换
+
+### 3.4 文本和属性查找方法
+
+- `findByText(string $text, string $selector = '*'): array`
+- `findByTextIgnoreCase(string $text, string $selector = '*'): array`
+- `findByAttribute(string $attribute, ?string $value = null, string $selector = '*'): array`
+
+### 3.5 表格处理（Element 方法）
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `extractTable` | `(?string $selector = 'table', array $options = []): array` | 从子元素中提取表格 |
+| `extractTableData` | `(array $options = []): array` | 当前元素自身作为表格提取 |
+| `extractTableRows` | `(array $options = []): array` | 提取表格行数据 |
+| `extractTableHeaders` | `(array $options = []): array` | 提取表格表头 |
+| `extractTableColumn` | `(int|string $column, array $options = []): array` | 提取指定列数据 |
+| `extractTableAsAssociative` | `(array $options = []): array` | 提取为关联数组 |
+| `extractNestedTables` | `(string $selector = 'table', array $options = []): array` | 提取嵌套表格 |
+
+```php
+// 获取 table 元素
+$table = $doc->first('table');
+// 提取表格数据
+$data = $table->extractTableData();
+// 提取表头
+$headers = $table->extractTableHeaders();
+// 提取某列
+$column = $table->extractTableColumn('姓名');
+$column = $table->extractTableColumn(0);
+// 提取为关联数组
+$assoc = $table->extractTableAsAssociative();
+```
+
+### 3.6 列表/表单/链接/图片提取（Element 方法）
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `extractList` | `(string $selector = 'ul', array $options = []): array` | 从子元素中提取列表 |
+| `extractFormData` | `(string $selector = 'form'): array` | 从子元素中提取表单 |
+| `extractLinks` | `(string $selector = 'a'): array` | 从子元素中提取链接 |
+| `extractImages` | `(string $selector = 'img'): array` | 从子元素中提取图片 |
+| `extractTexts` | `(string $selector, bool $trim = true): array` | 从子元素中提取文本 |
+
+### 3.7 属性操作方法
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `hasAttribute` | `(string $name): bool` | 检查属性是否存在 |
+| `getAttribute` | `(string $name, ?string $default = null): ?string` | 获取属性值 |
+| `setAttribute` | `(string $name, $value): self` | 设置属性值 |
+| `removeAttribute` | `(string $name): self` | 移除属性 |
+| `removeAttr` | `(string $name): self` | 移除属性（别名） |
+| `removeAllAttributes` | `(array $preserved = []): self` | 移除所有属性（可保留指定属性） |
+| `attributes` | `(?array $names = null): ?array` | 获取所有属性或指定属性 |
+| `attr` | `(string $name, ?string $value = null): self|?string` | 获取/设置属性 |
+| `id` | `(): ?string` | 获取元素 ID |
+| `setId` | `(string $id): self` | 设置元素 ID |
+
+### 3.8 类名和样式操作方法
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `classes()` | `: ClassAttribute` | 获取类属性管理对象 |
+| `class()` | `: ClassAttribute` | classes() 的别名 |
+| `addClass` | `(string ...$classNames): self` | 添加类名 |
+| `removeClass` | `(string ...$classNames): self` | 移除类名 |
+| `toggleClass` | `(string $className): self` | 切换类名 |
+| `hasClass` | `(string $className): bool` | 检查类名 |
+| `style()` | `: StyleAttribute` | 获取样式管理对象 |
+| `css` | `(string $name, ?string $value = null): self|string|null` | 获取/设置样式 |
+| `removeStyle` | `(string ...$names): self` | 移除样式 |
+| `hasStyle` | `(string $name): bool` | 检查样式是否存在 |
+
+### 3.9 节点关系方法
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `tagName` | `(): string` | 获取标签名 |
+| `children` | `(): array` | 获取子元素数组 |
+| `parent` | `(): ?Element` | 获取父元素 |
+| `ownerDocument` | `(): ?Document` | 获取所属 Document |
+| `firstChild` | `(): ?Element` | 获取第一个子元素 |
+| `lastChild` | `(): ?Element` | 获取最后一个子元素 |
+| `nextSibling` | `(): ?Element` | 获取下一个兄弟元素 |
+| `previousSibling` | `(): ?Element` | 获取前一个兄弟元素 |
+| `siblings` | `(): array` | 获取所有兄弟元素 |
+
+---
+
+## 四、Node 基类完整方法参考
+
+### 4.1 节点信息方法
+
+| 方法 | 签名 | 返回值 | 说明 |
+|------|------|--------|------|
+| `getNode` | `()` | `DOMNode` | 获取内部 DOM 节点 |
+| `setNode` | `($node)` | `void` | 设置内部 DOM 节点 |
+| `isElementNode` | `()` | `bool` | 是否为元素节点 |
+| `isTextNode` | `()` | `bool` | 是否为文本节点 |
+| `isCommentNode` | `()` | `bool` | 是否为注释节点 |
+| `getNodeName` | `()` | `string` | 获取节点名称 |
+| `getNodeValue` | `()` | `?string` | 获取节点值 |
+| `setNodeValue` | `(?string $value)` | `self` | 设置节点值 |
+| `getNodeType` | `()` | `int` | 获取节点类型（XML_*_NODE 常量） |
+| `getParentNode` | `()` | `?DOMNode` | 获取父节点 |
+| `getChildNodes` | `()` | `\DOMNodeList` | 获取子节点列表 |
+| `getFirstChild` | `()` | `?DOMNode` | 获取第一个子节点 |
+| `getLastChild` | `()` | `?DOMNode` | 获取最后一个子节点 |
+| `getNextSibling` | `()` | `?DOMNode` | 获取下一个兄弟节点 |
+| `getPreviousSibling` | `()` | `?DOMNode` | 获取前一个兄弟节点 |
+| `getOwnerDocument` | `()` | `?DOMDocument` | 获取所属文档 |
+
+### 4.2 内容操作方法
+
+| 方法 | 签名 | 返回值 | 说明 |
+|------|------|--------|------|
+| `html` | `()` | `string` | 获取节点的 HTML 内容（innerHTML） |
+| `text` | `()` | `string` | 获取节点的文本内容（textContent） |
+| `outerHtml` | `()` | `string` | 获取 outerHTML（包括自身） |
+| `normalizedText` | `()` | `string` | 获取规范化文本（去多余空白） |
+| `formattedHtml` | `(bool $format = true)` | `string` | 获取格式化 HTML |
+| `setValue` | `(string\|int\|float\|bool $value)` | `self` | 设置节点值 |
+| `setInnerHtml` | `(string $html)` | `self` | 设置内部 HTML |
+| `setText` | `(string $text)` | `self` | 设置文本内容 |
+
+### 4.3 节点操作方法
+
+| 方法 | 签名 | 返回值 | 说明 |
+|------|------|--------|------|
+| `before` | `(Node\|DOMNode\|array $nodes)` | `Node\|Node[]` | 在当前节点前插入 |
+| `after` | `(Node\|DOMNode\|array $nodes)` | `Node\|Node[]` | 在当前节点后插入 |
+| `prepend` | `(Node\|DOMNode\|array $nodes)` | `Node\|Node[]` | 在开头插入子节点 |
+| `append` | `(Node\|DOMNode\|array $nodes)` | `Node\|Node[]` | 在末尾追加子节点 |
+| `prependChild` | `(Node\|DOMNode\|array $nodes)` | `Node\|Node[]` | 同 prepend |
+| `appendChild` | `(Node\|DOMNode\|array $nodes)` | `Node\|Node[]` | 同 append |
+| `replaceWith` | `(Node\|DOMNode\|array $nodes)` | `self` | 替换当前节点 |
+| `remove` | `()` | `self` | 移除当前节点 |
+| `clone` | `(bool $deep = true)` | `Node` | 克隆节点（深度克隆包含子节点） |
+
+### 4.4 节点位置和检查方法
+
+| 方法 | 签名 | 返回值 | 说明 |
+|------|------|--------|------|
+| `index` | `()` | `int` | 节点在兄弟中的索引（0-based） |
+| `getNodeIndex` | `()` | `int` | 同 index() |
+| `getPath` | `(string $separator = ' > ')` | `string` | 获取从根到当前节点的路径 |
+| `matches` | `(string $selector, string\|bool $typeOrStrict = Query::TYPE_CSS)` | `bool` | 检查节点是否匹配选择器 |
+| `containsText` | `(string $text, bool $caseSensitive = false)` | `bool` | 是否包含指定文本 |
+| `containsHtml` | `(string $html)` | `bool` | 是否包含指定 HTML |
+
+---
+
+## 五、ClassAttribute 类完整方法参考
+
+管理元素 class 属性的便捷工具类。
+
+| 方法 | 签名 | 返回值 | 说明 |
+|------|------|--------|------|
+| `add` | `(string ...$classNames)` | `self` | 添加一个或多个类名 |
+| `remove` | `(string ...$classNames)` | `self` | 移除一个或多个类名 |
+| `toggle` | `(string $className)` | `self` | 切换类名 |
+| `contains` | `(string $className)` | `bool` | 检查是否包含指定类名 |
+| `replace` | `(string $oldClass, string $newClass)` | `self` | 替换类名 |
+| `clear` | `()` | `self` | 清空所有类名 |
+| `all` | `()` | `array` | 获取所有类名数组 |
+| `count` | `()` | `int` | 获取类名数量 |
+| `toArray` | `()` | `array` | 转换为数组 |
+| `__toString` | `()` | `string` | 转换为空格分隔的字符串 |
+
+```php
+$element->classes()->add('active', 'highlight');
+$element->classes()->remove('disabled');
+$element->classes()->toggle('expanded');
+$has = $element->classes()->contains('active');
+$element->classes()->replace('old', 'new');
+$allClasses = $element->classes()->all();
+$count = $element->classes()->count();
+```
+
+---
+
+## 六、StyleAttribute 类完整方法参考
+
+管理元素 style 属性的便捷工具类。
+
+| 方法 | 签名 | 返回值 | 说明 |
+|------|------|--------|------|
+| `set` | `(string $name, string $value)` | `self` | 设置样式属性（支持驼峰命名） |
+| `get` | `(string $name)` | `?string` | 获取样式属性值 |
+| `remove` | `(string ...$names)` | `self` | 移除一个或多个样式 |
+| `has` | `(string $name)` | `bool` | 检查样式是否存在 |
+| `all` | `()` | `array` | 获取所有样式数组 |
+| `merge` | `(string $styleString)` | `self` | 合并 style 字符串 |
+| `toArray` | `()` | `array` | 转换为数组 |
+| `__toString` | `()` | `string` | 转换为 style 字符串 |
+
+```php
+$element->style()->set('color', 'red');
+$element->style()->set('background-color', '#fff');
+$element->css('font-size', '14px');  // 便捷方法
+$color = $element->style()->get('color');
+$element->style()->remove('color', 'margin');
+$hasBg = $element->style()->has('background-color');
+$allStyles = $element->style()->all();
+$element->style()->merge('color: blue; font-size: 16px;');
+echo (string)$element->style(); // 'color: blue; font-size: 16px;'
+```
+
+---
+
+## 七、Fragments\DocumentFragment 类
+
+继承自 Node 类的文档片段类，用于创建和操作 DOM 文档片段。
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `__construct` | `(DOMDocumentFragment\|string $fragment = null)` | 创建文档片段 |
+| `appendTo` | `(Node $node)` | 将片段追加到指定节点 |
+| `prependTo` | `(Node $node)` | 将片段插入到指定节点开头 |
+| `insertBefore` | `(Node $node)` | 在指定节点前插入 |
+| `insertAfter` | `(Node $node)` | 在指定节点后插入 |
+| `html` | `()` | 获取片段 HTML 内容 |
+
+---
+
+## 八、Utils\Encoder 类（静态工具类）
+
+| 方法 | 签名 | 返回值 | 说明 |
+|------|------|--------|------|
+| `decode` | `(string $data)` | `string` | 自动检测并解码 HTML 实体 |
+| `encode` | `(string $data)` | `string` | 编码特殊字符为 HTML 实体 |
+| `decodeEntities` | `(string $data)` | `string` | 解码 HTML 实体 |
+| `encodeEntities` | `(string $data)` | `string` | 编码 HTML 实体 |
+| `toUtf8` | `(string $data, ?string $fromEncoding = null)` | `string` | 转换为 UTF-8 编码 |
+| `fromUtf8` | `(string $data, string $toEncoding = 'GBK')` | `string` | 从 UTF-8 转换到指定编码 |
+| `detectEncoding` | `(string $data)` | `string` | 检测字符串编码 |
+
+---
+
+## 九、Utils\Errors 类（静态工具类）
+
+| 方法 | 签名 | 返回值 | 说明 |
+|------|------|--------|------|
+| `getLastError` | `()` | `?string` | 获取最后一次 libxml 错误信息 |
+| `getErrors` | `()` | `array` | 获取所有 libxml 错误 |
+| `clearErrors` | `()` | `void` | 清除所有 libxml 错误 |
+| `isEnabled` | `()` | `bool` | 检查内部错误处理是否启用 |
+| `enable` | `()` | `void` | 启用内部错误处理 |
+| `disable` | `()` | `void` | 禁用内部错误处理 |
+| `setErrorHandler` | `(callable $handler)` | `void` | 设置自定义错误处理函数 |
+| `handleErrors` | `(callable $callback): mixed` | `mixed` | 在错误处理上下文中执行回调 |
+
+```php
+use zxf\Dom\Utils\Errors;
+
+Errors::enable(); // 启用内部错误处理
+$doc = new Document($malformedHtml);
+$errors = Errors::getErrors(); // 获取解析错误
+Errors::clearErrors(); // 清除错误
+Errors::disable(); // 恢复标准错误处理
+```
+
+---
+
+## 十、Exceptions\InvalidSelectorException 类
+
+当 CSS 选择器格式无效时抛出的异常。
+
+```
+class InvalidSelectorException extends RuntimeException
+```
+
+被以下方法抛出：
+- `Query::compile()` — 选择器格式无效时
+- `Query::cssToXpath()` — CSS 转 XPath 失败时
+- `Document::find()` — 选择器无效时
+
+---
+
+## 十一、Query 类静态方法完整参考
+
+### 类型检测方法
+
+| 方法 | 签名 | 返回值 | 说明 | 示例 |
+|------|------|--------|------|------|
+| `detectSelectorType` | `(string $selector)` | `string` | 智能检测选择器类型 | `'css'`、`'xpath'`、`'regex'` |
+| `isXPathAbsolute` | `(string $expression)` | `bool` | 是否为 XPath 绝对路径 | `'/html/body/div'` → `true` |
+| `isXPathRelative` | `(string $expression)` | `bool` | 是否为 XPath 相对路径 | `'//div'` → `true` |
+| `compile` | `(string $expression, string $type = self::TYPE_CSS)` | `string` | 编译选择器为 XPath | CSS→XPath 转换 |
+| `parseSelector` | `(string $selector)` | `array` | 解析 CSS 选择器为段数组 | 返回结构化解析结果 |
+
+### 选择器预定义正则常量
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `PATTERN_PSEUDO_ELEMENT` | `'/\:\:([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/'` | 匹配伪元素 |
+| `PATTERN_PSEUDO_CLASS` | `'/\:([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/'` | 匹配伪类 |
+| `PATTERN_ATTRIBUTE` | `'/\[([a-zA-Z0-9_-]+)([*~\|^$]?=)?([\"\']?)(.*?)\3\]/'` | 匹配属性选择器 |
+| `PATTERN_ID` | `'/\#([a-zA-Z0-9_-]+)/'` | 匹配 ID 选择器 |
+| `PATTERN_CLASS` | `'/\.([a-zA-Z0-9_-]+)/'` | 匹配类选择器 |
+| `PATTERN_XPATH_ABSOLUTE` | `'/^\//'` | 匹配 XPath 绝对路径 |
+| `PATTERN_XPATH_RELATIVE` | `'/^\/\//'` | 匹配 XPath 相对路径 |
+
+### 缓存管理方法
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `initialize` | `(): void` | 初始化 Query 类，设置 libxml 错误处理 |
+| `isInitialized` | `(): bool` | 检查是否已初始化 |
+| `reset` | `(): void` | 重置 Query 类状态，清空缓存 |
+| `getCompiled` | `(): array` | 获取已编译的选择器缓存 |
+| `setCompiled` | `(array $compiled): void` | 设置已编译的选择器缓存 |
+| `clearCompiled` | `(): void` | 清空编译缓存 |
+| `getCacheStats` | `(): array{hits: int, misses: int, hitRate: float}` | 获取缓存统计信息 |
+
+```php
+// 缓存管理示例
+Query::initialize();
+$stats = Query::getCacheStats(); // ['hits' => 120, 'misses' => 5, 'hitRate' => 96.0]
+Query::clearCompiled(); // 清空缓存以释放内存或测试选择器
+```
+
+---
+
+**附录总结**: 本文档完整覆盖了本扩展包中：
+- **10 个选择器类型常量** 及其所有可配置值
+- **Document 类 100+ 方法** 的所有参数、所有可选值、使用场景
+- **Element 类 80+ 方法** 的完整参考
+- **Node 基类 30+ 方法** 的完整参考
+- **ClassAttribute / StyleAttribute** 工具类完整方法
+- **DocumentFragment、Encoder、Errors** 辅助类完整方法
+- **InvalidSelectorException** 异常说明
+- **Query 类** 所有静态方法、常量、缓存管理
+- **extractTable 17 个配置参数** 完整枚举
+- **extractList 3 个配置参数** 完整枚举
+- **queryMatrix 5 个配置参数** 完整枚举
+- **findWithFallback 6 个配置参数** 完整枚举
+- **9 种选择器类型** 的返回类型和行为说明

@@ -13,7 +13,12 @@
 - ✅ **扩展选择器功能** - 文本长度匹配、属性长度/数量选择器、基于深度的选择器
 - ✅ **正则表达式支持** - 强大的正则表达式匹配和数据提取功能
 - ✅ **表格数据提取** - 重构后的表格处理，严格分离表头表体，避免数据混杂
-- ✅ **矩阵数据提取** - 重构后的矩阵数据处理，给出每行每列数据 queryMatrix；
+- ✅ **列表数据提取** - 支持嵌套列表递归提取数据
+- ✅ **矩阵数据提取** - 重构后的矩阵数据处理，给出每行每列数据 queryMatrix
+- ✅ **表单数据提取** - 提取表单字段数据，返回字段名与值的关联数组
+- ✅ **链接/图片数据提取** - 提取链接和图片的结构化数据
+- ✅ **智能选择器类型** - findWithFallback 支持 css/xpath/regex/table/list/form/link/image/text/json 10种选择器类型
+- ✅ **JSON 数据处理** - 支持 JSON 字符串/数组/对象的解析和提取
 - ✅ **链式调用** - 流畅的 API 设计，支持链式操作
 - ✅ **PHP 8.2+ 类型系统** - 完整的类型注解，更好的 IDE 支持
 - ✅ **HTML/XML 双模式** - 同时支持 HTML 和 XML 文档处理
@@ -287,11 +292,48 @@ $allTables = $doc->extractTable(null);
 $tableElement = $doc->first('table');
 $tableData = $doc->extractTable($tableElement);
 
-// findWithFallback 增强
-$dates = $doc->findWithFallback([
-    ['selector' => 'table.date-table'],
-    ['selector' => '//table[contains(@class, "date")]', 'type' => 'xpath'],
-    ['selector' => '/\d{4}-\d{2}-\d{2}/', 'type' => 'regex', 'extractMode' => 'text']
+// findWithFallback 回退查找（支持 10 种选择器类型）
+$titles = $doc->findWithFallback([
+    ['selector' => 'h1.title'],
+    ['selector' => '//h1[@class="title"]', 'type' => 'xpath'],
+    ['selector' => '/<h1[^>]*class="title"[^>]*>/i', 'type' => 'regex', 'extractMode' => 'text'],
+]);
+
+// 提取表格数据（table 类型）
+$tableData = $doc->findWithFallback([
+    ['selector' => 'table.data-table', 'type' => 'table'],
+    ['selector' => 'table.old-table', 'type' => 'table'],
+]);
+
+// 提取列表数据（list 类型）
+$listData = $doc->findWithFallback([
+    ['selector' => 'ul.product-list', 'type' => 'list'],
+    ['selector' => 'ol.old-product-list', 'type' => 'list'],
+]);
+
+// 提取表单数据（form 类型）
+$formData = $doc->findWithFallback([
+    ['selector' => 'form#login', 'type' => 'form'],
+]);
+
+// 提取链接数据（link 类型）
+$links = $doc->findWithFallback([
+    ['selector' => 'a.external', 'type' => 'link'],
+]);
+
+// 提取图片数据（image 类型）
+$images = $doc->findWithFallback([
+    ['selector' => 'img.thumbnail', 'type' => 'image'],
+]);
+
+// 提取文本内容（text 类型）
+$texts = $doc->findWithFallback([
+    ['selector' => 'p.description', 'type' => 'text'],
+]);
+
+// JSON 数据提取（json 类型）
+$jsonData = $doc->findWithFallback([
+    ['selector' => '', 'type' => 'json'],
 ]);
 
 // XPath 查询
@@ -563,5 +605,85 @@ MIT License
 
 ---
 
-*版本: 1.0.0*  
-*最后更新: 2026-01-07*
+*版本: 2.0.0*  
+*最后更新: 2026-05-14*
+
+---
+
+## 附录：快速参数参考
+
+### selectors 数组参数格式（findWithFallback）
+
+```php
+[
+    'selector'       => 'string',     // CSS/XPath/正则 选择器表达式
+    'type'           => 'string',     // css|xpath|regex|table|list|form|link|image|text|json
+    'attribute'      => 'string|null', // 仅 type=regex，匹配的属性名
+    'extractMode'    => 'string|null', // 仅 type=regex: elements|text|attr|match
+    'group'          => 'int|null',    // 仅 extractMode=match，分组索引
+    'location'       => 'array|null',  // 仅 type=regex，多分组提取配置
+    'extractOptions' => 'array|null',  // 仅 type=table|list|text，提取选项
+]
+```
+
+### extractTable 选项
+
+```php
+$options = [
+    'selectorType'          => 'auto',       // auto|css|xpath|regex
+    'headerRow'             => 0,            // 表头行索引
+    'skipRows'              => 0,            // 跳过行数
+    'includeHeader'         => true,         // 包含表头
+    'includeHeaderAsFirstRow' => false,      // 表头作为首行
+    'trimText'              => true,         // 修剪空白
+    'removeEmpty'           => true,         // 移除空行
+    'cellSelector'          => 'td, th',     // 单元格选择器
+    'rowSelector'           => 'tr',         // 行选择器
+    'returnFormat'          => 'structured', // structured|associative|indexed|both
+    'preserveStructure'     => true,         // 保留 thead/tbody/tfoot
+    'returnAllTables'       => true,         // 返回所有表格
+    'tableIndex'            => null,         // 指定表格索引
+];
+```
+
+### extractList 选项
+
+```php
+$options = [
+    'recursive'    => false,  // 递归提取嵌套列表
+    'trimText'     => true,   // 修剪空白
+    'includeIndex' => false,  // 包含索引
+];
+```
+
+### queryMatrix 选项
+
+```php
+$options = [
+    'rowSelector'  => null,    // 行选择器，null=直接子元素
+    'cellSelector' => null,    // 单元格选择器，null=直接子元素
+    'trimText'     => true,    // 修剪空白
+    'removeEmpty'  => true,    // 移除空行
+    'selectorType' => 'auto',  // auto|css|xpath|regex
+];
+```
+
+### Document 类常用方法速查
+
+| 方法 | 功能 | 参数 |
+|------|------|------|
+| `find()` | 查找元素 | `(expression, type='css', contextNode=null)` |
+| `first()` | 查找首个 | `(expression, type='css', contextNode=null)` |
+| `xpath()` | XPath 查询 | `(xpathExpression)` |
+| `regex()` | 正则查找 | `(pattern, contextNode=null, attribute=null)` |
+| `findByText()` | 文本查找 | `(text, selector='*')` |
+| `findByAttribute()` | 属性查找 | `(attribute, value=null, selector='*')` |
+| `findByData()` | data属性查找 | `(dataName, value=null, selector='*')` |
+| `findByPath()` | 路径查找 | `(path, relative=false)` |
+| `extractTable()` | 提取表格 | `(table=null, options=[])` |
+| `extractList()` | 提取列表 | `(list=null, options=[])` |
+| `extractFormData()` | 提取表单 | `(form=null)` |
+| `findWithFallback()` | 回退查找 | `(selectors, contextNode=null, getFirst=true)` |
+| `queryMatrix()` | 矩阵数据 | `(container='div', options=[])` |
+
+详细完整参数说明请参考 `src/docs/RULE_GUIDE.md`（选择器规则说明文档）和 `src/docs/USER_GUIDE.md`（完整使用指南）。

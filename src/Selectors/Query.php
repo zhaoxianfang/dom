@@ -96,10 +96,61 @@ class Query
      * 正则表达式选择器类型
      */
     public const TYPE_REGEX = 'regex';
+
     /**
      * JSON 选择器类型[采集对象是json数组或者字符串]
      */
     public const TYPE_JSON = 'json';
+
+    /**
+     * 表格数据提取选择器类型
+     *
+     * 使用此类型时，选择器将用于定位 table 元素，
+     * 并通过 extractTable() 方法提取结构化表格数据。
+     * 支持 CSS 选择器、XPath、正则表达式等子类型。
+     */
+    public const TYPE_TABLE = 'table';
+
+    /**
+     * 列表数据提取选择器类型
+     *
+     * 使用此类型时，选择器将用于定位 ul/ol 元素，
+     * 并通过 extractList() 方法提取列表数据。
+     * 支持 CSS 选择器、XPath、正则表达式等子类型。
+     */
+    public const TYPE_LIST = 'list';
+
+    /**
+     * 表单数据提取选择器类型
+     *
+     * 使用此类型时，选择器将用于定位 form 元素，
+     * 并通过 extractFormData() 方法提取表单数据。
+     */
+    public const TYPE_FORM = 'form';
+
+    /**
+     * 链接数据提取选择器类型
+     *
+     * 使用此类型时，选择器将用于定位 a 元素，
+     * 并通过 extractLinks() 方法提取链接数据。
+     */
+    public const TYPE_LINK = 'link';
+
+    /**
+     * 图片数据提取选择器类型
+     *
+     * 使用此类型时，选择器将用于定位 img 元素，
+     * 并通过 extractImages() 方法提取图片数据。
+     */
+    public const TYPE_IMAGE = 'image';
+
+    /**
+     * 文本提取选择器类型
+     *
+     * 使用此类型时，选择器将用于定位元素，
+     * 并返回元素的 text() 文本内容。
+     */
+    public const TYPE_TEXT = 'text';
 
     /**
      * 常用正则表达式模式（优化性能，避免重复编译）
@@ -219,9 +270,20 @@ class Query
     {
         $type = strtolower($type);
 
-        if (! in_array($type, [self::TYPE_CSS, self::TYPE_XPATH, self::TYPE_REGEX], true)) {
+        $supportedTypes = [self::TYPE_CSS, self::TYPE_XPATH, self::TYPE_REGEX, self::TYPE_TABLE, self::TYPE_LIST, self::TYPE_FORM, self::TYPE_LINK, self::TYPE_IMAGE, self::TYPE_TEXT, self::TYPE_JSON];
+        if (! in_array($type, $supportedTypes, true)) {
             throw new RuntimeException(sprintf('不支持的表达式类型 "%s"。', $type));
         }
+
+        // 表格、列表、表单、链接、图片、文本类型：内部转 CSS 或 XPath 编译
+        if (in_array($type, [self::TYPE_TABLE, self::TYPE_LIST, self::TYPE_FORM, self::TYPE_LINK, self::TYPE_IMAGE, self::TYPE_TEXT], true)) {
+            // 如果以 / 或 // 开头则视为 xpath，否则视为 CSS
+            if (self::isXPathAbsolute($expression) || self::isXPathRelative($expression)) {
+                return self::compile($expression, self::TYPE_XPATH);
+            }
+            return self::compile($expression, self::TYPE_CSS);
+        }
+
 
         $expression = trim($expression);
 
@@ -976,7 +1038,7 @@ class Query
             'button' => '[self::button or self::input[@type="button" or @type="submit" or @type="reset"]]',
             'text' => '[self::text()]',
             'comment' => '[self::comment()]',
-            'link' => '[self::a and @href]',
+            'link' => '[self::a[@href]]',
             'any-link' => '[self::a[@href] or self::area[@href]]',
             'local-link' => '[self::a and @href and starts-with(@href, "#")]',
             'visited' => '[self::a]', // XPath无法准确判断visited状态
@@ -1009,7 +1071,6 @@ class Query
             'script' => '[self::script]',
             'style' => '[self::style]',
             'meta' => '[self::meta]',
-            'link' => '[self::link]',
             'base' => '[self::base]',
             'head' => '[self::head]',
             'body' => '[self::body]',
