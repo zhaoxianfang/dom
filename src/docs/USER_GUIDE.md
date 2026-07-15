@@ -833,6 +833,75 @@ print_r($data);
 // ]
 ```
 
+### 元素匹配 matches
+
+`matches()` 用于判断**当前元素（或节点）**是否匹配给定的 CSS 选择器，常用于遍历 `find()` 结果后做二次过滤。
+
+- `Element::matches(string $selector, bool|string $strict = false): bool`
+- `Node::matches(string $selector, bool|string $typeOrStrict = Query::TYPE_CSS): bool`
+
+**严格模式（推荐，第二个参数传 `true`）**：直接基于已解析的 DOM 节点做精确匹配，性能更好，且语义正确：
+
+- **标签**：必须与元素标签一致（或选择器为 `*`）。
+- **ID**：仅当选择器显式写了 `#id` 才校验 id；元素自身是否带 id 不影响匹配。
+- **类名**：选择器要求的**每一个**类名都必须在元素中存在（元素可包含额外类名）。
+- **属性**：
+  - `[attr]` —— 仅要求属性存在；
+  - `[attr=value]` —— 要求属性存在且值相等；
+  - `[attr!=value]` —— 要求属性存在且值**不**等于给定值（不存在该属性的元素同样不匹配）；
+  - 元素拥有选择器未提及的额外属性时，不影响匹配结果。
+
+```php
+$el = $doc->first('div.box#main');
+$el->matches('div.box', true);       // true（元素额外带 id 也匹配）
+$el->matches('div.missing', true);   // false
+$el->matches('div[title]', true);    // true（title 属性存在）
+```
+
+> 注意：严格模式只校验选择器**第一段**的标签/ID/类名/属性；若选择器包含组合器（如 `div.foo > span`），请使用非严格模式（`false`，默认），内部会临时序列化并用 `Document::has()` 整段匹配，但开销更大。
+
+### 矩阵数据提取 queryMatrix
+
+`queryMatrix()` 用于提取“看起来像表格但不是 `<table>` 标签”的矩阵型数据（如用 `div` 行/单元格布局的网格），按行列返回二维数组。
+
+```php
+$matrix = $doc->queryMatrix('.data-grid', [
+    'rowSelector'  => '.data-row',   // 行选择器；null 表示使用直接子元素
+    'cellSelector' => '.data-cell',  // 单元格选择器；null 表示使用直接子元素
+    'selectorType' => 'css',         // 仅支持 css / xpath（'auto' 视为 css）
+    'trimText'     => true,          // 是否修剪单元格文本空白
+    'removeEmpty'  => true,          // 是否移除空行 / 空单元格
+]);
+// 返回：[['张三','男'], ['李四','女']]
+```
+
+> `queryMatrix()` 在 `Document` 与 `Element` 上均可调用；当不传容器选择器时，`Element::queryMatrix()` 以自身作为矩阵容器。
+
+### 列表与定义列表提取
+
+`extractList()` 提取 `<ul>/<ol>` 列表文本，自动识别直接子元素 `<li>` 并正确处理嵌套列表（嵌套的 `<li>` 不会误当作顶层项）；`extractDefinitionList()` 提取 `<dl>` 的术语/描述对。
+
+```php
+$list = $doc->extractList();                           // 默认提取页面第一个列表
+$list = $doc->extractList('ul.items');                 // 指定列表
+$list = $doc->extractList(null, ['recursive' => true]); // 嵌套列表作为子数组返回
+
+$dl = $doc->extractDefinitionList();                   // ['姓名' => '张三', '年龄' => '30']
+```
+
+### JSON 辅助函数 parse_json
+
+本扩展通过 Composer 的 `files` 自动加载提供全局函数 `parse_json(mixed $data): array|false`，用于在数据形态不确定时安全地把 JSON 字符串/数组/对象归一化为数组：
+
+```php
+parse_json('{"a":1}');        // ['a' => 1]
+parse_json(['b' => 2]);       // ['b' => 2]（已是数组直接返回）
+parse_json($someObject);      // 对象经 json_encode / json_decode 后返回数组
+parse_json('');               // false（空串 / 无效 JSON）
+```
+
+`Document::json($content)` 内部即使用该函数；通过 `find(..., Query::TYPE_JSON)` 使用 JSON 选择器时，解析同样依赖它。
+
 ### 网页爬虫
 
 ```php

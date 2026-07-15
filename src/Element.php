@@ -123,7 +123,7 @@ class Element extends Node
 
             $document = new Document;
 
-            $document->loadHtml($html, LIBXML_HTML_NODEFDTD | LIBXML_HTML_NOIMPLIED);
+            $document->loadHtml($html);
 
             return $document->has($selector);
         }
@@ -139,33 +139,46 @@ class Element extends Node
             return false;
         }
 
-        $segmentId = $segment['id'] ?? null;
-
-        if ($segmentId !== $this->getAttribute('id')) {
+        // 仅当选择器显式指定了 id 时才校验 id（元素自带额外 id 不应导致不匹配）；
+        // 元素缺少属性时 getAttribute 返回 null，需与空字符串统一比较
+        $segmentId = $segment['id'] ?? '';
+        if ($segmentId !== '' && $segmentId !== ($this->getAttribute('id') ?? '')) {
             return false;
         }
 
-        $classes = $this->hasAttribute('class') ? explode(' ', trim($this->getAttribute('class'))) : [];
+        $classes = $this->hasAttribute('class')
+            ? array_filter(explode(' ', trim($this->getAttribute('class'))), fn($c) => $c !== '')
+            : [];
 
+        // 选择器要求的所有类名都必须在元素中存在（元素可包含额外类名）
         $segmentClasses = $segment['classes'] ?? [];
-
-        $diff1 = array_diff($segmentClasses, $classes);
-        $diff2 = array_diff($classes, $segmentClasses);
-
-        if (count($diff1) > 0 || count($diff2) > 0) {
+        if (count(array_diff($segmentClasses, $classes)) > 0) {
             return false;
         }
 
-        $attributes = $this->attributes();
+        // 严格匹配属性（支持存在性、等于、不等于）
+        foreach ($segment['attributes'] ?? [] as $attr) {
+            $name = $attr['name'] ?? '';
+            $operator = $attr['operator'] ?? null;
+            $value = $attr['value'] ?? null;
+            $has = $this->hasAttribute($name);
 
-        unset($attributes['id'], $attributes['class']);
-
-        $diff1 = array_diff_assoc($segments['attributes'], $attributes);
-        $diff2 = array_diff_assoc($attributes, $segments['attributes']);
-
-        // if the attributes are not equal
-        if (count($diff1) > 0 || count($diff2) > 0) {
-            return false;
+            if ($operator === '!=') {
+                // 属性存在且值等于指定值时不匹配
+                if ($has && $this->getAttribute($name) === $value) {
+                    return false;
+                }
+            } elseif ($operator === null || $operator === '') {
+                // 仅要求属性存在
+                if (! $has) {
+                    return false;
+                }
+            } else {
+                // 要求属性存在且值相等
+                if (! $has || $this->getAttribute($name) !== $value) {
+                    return false;
+                }
+            }
         }
 
         return true;
@@ -644,6 +657,18 @@ class Element extends Node
         }
 
         return $document->first($selector, $type, $this->node);
+    }
+
+    /**
+     * 查找第一个匹配的后代元素（语义化别名）
+     *
+     * @param  string  $selector  选择器
+     * @param  string  $type  选择器类型
+     * @return Element|null 第一个匹配的元素
+     */
+    public function findFirst(string $selector, string $type = Query::TYPE_CSS): ?Element
+    {
+        return $this->first($selector, $type);
     }
 
     /**
@@ -1345,10 +1370,14 @@ class Element extends Node
             'selectorType' => 'auto' // 选择器类型: auto/css/xpath/regex
         ];
         $options = array_merge($defaultOptions, $options);
+        // 规范化选择器类型（queryMatrix 仅支持 css / xpath，'auto' 视为 css）
+        $selType = $options['selectorType'] === \zxf\Dom\Selectors\Query::TYPE_XPATH
+            ? \zxf\Dom\Selectors\Query::TYPE_XPATH
+            : \zxf\Dom\Selectors\Query::TYPE_CSS;
 
         // 获取矩阵容器元素
         if ($containerSelector !== null) {
-            $containerElement = $this->findFirst($containerSelector, $options['selectorType'] ?? 'auto');
+            $containerElement = $this->findFirst($containerSelector, $selType);
             if ($containerElement === null) {
                 return [];
             }
@@ -1360,7 +1389,7 @@ class Element extends Node
         $rows = [];
         if ($options['rowSelector'] !== null) {
             // 使用指定的行选择器
-            $rows = $containerElement->find($options['rowSelector'], $options['selectorType'] ?? 'auto');
+            $rows = $containerElement->find($options['rowSelector'], $selType);
         } else {
             // 使用直接子元素作为行
             $rows = $containerElement->children();
@@ -1377,7 +1406,7 @@ class Element extends Node
 
             if ($options['cellSelector'] !== null) {
                 // 使用指定的单元格选择器
-                $cellElements = $row->find($options['cellSelector'], $options['selectorType'] ?? 'auto');
+                $cellElements = $row->find($options['cellSelector'], $selType);
             } else {
                 // 使用直接子元素作为单元格
                 $cellElements = $row->children();

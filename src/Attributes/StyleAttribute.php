@@ -95,11 +95,18 @@ class StyleAttribute
         $styles = [];
         foreach (explode(';', trim($styleString)) as $rule) {
             $rule = trim($rule);
-            if ($rule !== '') {
-                [$property, $value] = array_map('trim', explode(':', $rule, 2));
-                if (isset($value)) {
-                    $styles[$property] = $value;
-                }
+            if ($rule === '') {
+                continue;
+            }
+            // 按第一个冒号分割属性名与值；缺少冒号的非法规则直接跳过，避免 Undefined array key 警告
+            $parts = explode(':', $rule, 2);
+            if (count($parts) !== 2 || $parts[1] === '') {
+                continue;
+            }
+            $property = trim($parts[0]);
+            $value = trim($parts[1]);
+            if ($property !== '') {
+                $styles[$property] = $value;
             }
         }
 

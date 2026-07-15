@@ -2563,6 +2563,117 @@ run_test('CSS全路径查找', function() use ($dom39) {
     return count($elements) === 1 && trim($elements[0]->text()) === '标题';
 });
 
+// ==================== 回归测试：缺陷修复验证 ====================
+
+echo "\n--- 回归测试：matches / queryMatrix / extractList / StyleAttribute / parse_json ---\n";
+
+// 确保全局辅助函数 parse_json 可用
+require_once __DIR__ . '/../helpers.php';
+
+// 1. Element::matches() 严格模式
+$regDom1 = new Document('<div id="a" class="foo bar baz">x</div>');
+$regEl1 = $regDom1->first('#a');
+run_test('matches 严格模式：元素带 id 但选择器无 id 约束也匹配', function() use ($regEl1) {
+    return $regEl1->matches('div.foo.bar', true) === true;
+});
+run_test('matches 严格模式：缺少选择器要求的类名不匹配', function() use ($regEl1) {
+    return $regEl1->matches('div.foo.qux', true) === false;
+});
+run_test('matches 严格模式：标签不匹配', function() use ($regEl1) {
+    return $regEl1->matches('span.foo', true) === false;
+});
+run_test('matches 严格模式：id 不匹配', function() use ($regEl1) {
+    return $regEl1->matches('div#b', true) === false;
+});
+
+$regDom2 = new Document('<a href="/x" title="t" data-no="n">l</a>');
+$regEl2 = $regDom2->first('a');
+run_test('matches 严格模式：属性等于', function() use ($regEl2) {
+    return $regEl2->matches('a[href="/x"]', true) === true;
+});
+run_test('matches 严格模式：属性不等于(值不同应通过)', function() use ($regEl2) {
+    return $regEl2->matches('a[href!="/y"]', true) === true;
+});
+run_test('matches 严格模式：属性不等于(值相同应失败)', function() use ($regEl2) {
+    return $regEl2->matches('a[href!="/x"]', true) === false;
+});
+run_test('matches 严格模式：属性仅存在', function() use ($regEl2) {
+    return $regEl2->matches('a[title]', true) === true;
+});
+run_test('matches 严格模式：属性不存在失败', function() use ($regEl2) {
+    return $regEl2->matches('a[rel]', true) === false;
+});
+$regDom3 = new Document('<input type="text" name="q" value="1" class="c">');
+$regEl3 = $regDom3->first('input');
+run_test('matches 严格模式：元素额外属性不影响匹配', function() use ($regEl3) {
+    return $regEl3->matches('input[type="text"][name="q"]', true) === true;
+});
+
+// 2. Node::matches() 底层节点比较（修复始终返回 false）
+$regDom4 = new Document('<ul><li class="item">A</li><li>B</li></ul>');
+$regLis = $regDom4->find('li');
+run_test('Node::matches：匹配的元素返回 true', function() use ($regLis) {
+    return $regLis[0]->matches('li.item') === true;
+});
+run_test('Node::matches：不匹配的元素返回 false', function() use ($regLis) {
+    return $regLis[1]->matches('li.item') === false;
+});
+
+// 3. StyleAttribute::all() 容错（缺少冒号的非法规则）
+$regDom5 = new Document('<div style="color:red; broken; font-size:12px">x</div>');
+$regEl5 = $regDom5->first('div');
+run_test('StyleAttribute::all：正常规则解析', function() use ($regEl5) {
+    $style = new \zxf\Dom\Attributes\StyleAttribute($regEl5);
+    $all = $style->all();
+    return ($all['color'] ?? null) === 'red' && ($all['font-size'] ?? null) === '12px';
+});
+run_test('StyleAttribute::all：跳过非法(无冒号)规则', function() use ($regEl5) {
+    $style = new \zxf\Dom\Attributes\StyleAttribute($regEl5);
+    $all = $style->all();
+    return !array_key_exists('broken', $all);
+});
+
+// 4. queryMatrix 默认选择器类型（修复 'auto' 崩溃）
+$regDom6 = new Document('<div class="matrix"><div class="row"><div class="cell">张三</div><div class="cell">男</div></div><div class="row"><div class="cell">李四</div><div class="cell">女</div></div></div>');
+run_test('queryMatrix：默认 css 选择器返回二维数组', function() use ($regDom6) {
+    return $regDom6->queryMatrix('.matrix') === [['张三', '男'], ['李四', '女']];
+});
+
+// 5. extractList 嵌套列表（修复嵌套 li 被误当作顶层项）
+$regDom7 = new Document('<ul><li>a</li><li>b<ul><li>nested</li></ul></li><li>c</li></ul>');
+run_test('extractList：嵌套不在顶层(默认)', function() use ($regDom7) {
+    return $regDom7->extractList() === ['a', 'bnested', 'c'];
+});
+run_test('extractList：嵌套递归为子数组', function() use ($regDom7) {
+    return $regDom7->extractList(null, ['recursive' => true]) === ['a', 'bnested', ['nested'], 'c'];
+});
+
+// 6. extractDefinitionList（修复 > 组合器解析）
+$regDom8 = new Document('<dl><dt>姓名</dt><dd>张三</dd><dt>年龄</dt><dd>30</dd></dl>');
+run_test('extractDefinitionList：正确提取术语与描述', function() use ($regDom8) {
+    $dl = $regDom8->extractDefinitionList();
+    return ($dl['姓名'] ?? null) === '张三' && ($dl['年龄'] ?? null) === '30';
+});
+
+// 7. parse_json 全局函数
+run_test('parse_json：JSON 字符串', function() {
+    return parse_json('{"a":1}') === ['a' => 1];
+});
+run_test('parse_json：数组直接返回', function() {
+    return parse_json(['b' => 2]) === ['b' => 2];
+});
+run_test('parse_json：空字符串返回 false', function() {
+    return parse_json('') === false;
+});
+
+// 8. 属性选择器 [attr!=value] 解析（修复正则未捕获 !=）
+$regDom9 = new Document('<a href="/x">x</a><a href="/y">y</a><a>none</a>');
+run_test('find：[attr!=value] 正确排除等于值', function() use ($regDom9) {
+    $els = $regDom9->find('a[href!="/x"]');
+    // [attr!=value] 编译为 [@attr and @attr!="value"]：要求属性存在且不等于给定值
+    return count($els) === 1 && $els[0]->getAttribute('href') === '/y';
+});
+
 // ==================== 完整测试总结 ====================
 
 echo "\n\n";

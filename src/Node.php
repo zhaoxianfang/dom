@@ -686,8 +686,17 @@ abstract class Node
         }
 
         $type = is_string($typeOrStrict) ? $typeOrStrict : Query::TYPE_CSS;
-        $elements = $document->find($selector, $type, $this->node->parentNode);
-        return in_array($this, $elements, true);
+        $context = ($this->node->parentNode instanceof DOMElement) ? $this->node->parentNode : null;
+        $elements = $document->find($selector, $type, $context);
+
+        // 通过比较底层 DOM 节点来判断是否匹配，避免因对象实例不同（in_array 严格比较）而误判
+        foreach ($elements as $element) {
+            if ($element instanceof Node && $element->getNode() === $this->node) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

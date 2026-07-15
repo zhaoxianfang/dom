@@ -632,6 +632,24 @@ class Document
     }
 
     /**
+     * 使用选择器数组回退查找时的第一个结果别名
+     *
+     * 与 first() 完全一致，提供语义化的命名（避免被 __call 魔法方法误分发）。
+     *
+     * @param  string  $expression  选择器表达式
+     * @param  string  $type  选择器类型
+     * @param  DOMElement|null  $contextNode  上下文节点
+     * @return Element|string|array|null 第一个匹配的元素、提取结果或 null
+     */
+    public function findFirst(
+        string $expression,
+        string $type = Query::TYPE_CSS,
+        ?DOMElement $contextNode = null
+    ): Element|string|array|null {
+        return $this->first($expression, $type, $contextNode);
+    }
+
+    /**
      * 使用 XPath 查询元素
      *
      * 支持完整的 XPath 1.0 语法，包括：
@@ -4285,13 +4303,20 @@ class Document
     protected function extractSingleList(Element $listElement, array $options, int $startIndex = 0): array
     {
         $data = [];
-        $items = $listElement->find('> li'); // 只查找直接子元素li
+        // 只查找直接子元素 li（使用 children() 过滤，避免 CSS 前置组合器解析问题）
+        $items = array_values(array_filter(
+            $listElement->children(),
+            fn(Element $c) => $c->tagName() === 'li'
+        ));
 
         foreach ($items as $index => $item) {
             $text = $item->text();
 
-            // 检查是否有嵌套列表
-            $nestedLists = $item->find('> ul, > ol');
+            // 检查是否有嵌套列表（直接子元素 ul/ol）
+            $nestedLists = array_values(array_filter(
+                $item->children(),
+                fn(Element $c) => $c->tagName() === 'ul' || $c->tagName() === 'ol'
+            ));
             $nestedData = [];
 
             if ($options['recursive'] && !empty($nestedLists)) {
@@ -4393,8 +4418,11 @@ class Document
         $data = [];
         $currentTerm = null;
 
-        // 获取所有dt和dd元素
-        $children = $dlElement->find('> dt, > dd');
+        // 获取直接子元素 dt 和 dd（使用 children() 过滤，避免 CSS 前置组合器解析问题）
+        $children = array_values(array_filter(
+            $dlElement->children(),
+            fn(Element $c) => $c->tagName() === 'dt' || $c->tagName() === 'dd'
+        ));
 
         foreach ($children as $child) {
             $text = $child->text();
@@ -4875,12 +4903,14 @@ class Document
             'selectorType' => 'auto' // 选择器类型: auto/css/xpath/regex
         ];
         $options = array_merge($defaultOptions, $options);
+        // 规范化选择器类型（queryMatrix 仅支持 css / xpath，'auto' 视为 css）
+        $selType = $options['selectorType'] === Query::TYPE_XPATH ? Query::TYPE_XPATH : Query::TYPE_CSS;
 
         // 获取矩阵容器元素
         if ($container instanceof Element) {
             $containerElement = $container;
         } else {
-            $containerElement = $this->findFirst($container, $options['selectorType'] ?? 'auto');
+            $containerElement = $this->findFirst($container, $selType);
             if ($containerElement === null) {
                 return [];
             }
@@ -4890,7 +4920,7 @@ class Document
         $rows = [];
         if ($options['rowSelector'] !== null) {
             // 使用指定的行选择器
-            $rows = $containerElement->find($options['rowSelector'], $options['selectorType'] ?? 'auto');
+            $rows = $containerElement->find($options['rowSelector'], $selType);
         } else {
             // 使用直接子元素作为行
             $rows = $containerElement->children();
@@ -4907,7 +4937,7 @@ class Document
 
             if ($options['cellSelector'] !== null) {
                 // 使用指定的单元格选择器
-                $cellElements = $row->find($options['cellSelector'], $options['selectorType'] ?? 'auto');
+                $cellElements = $row->find($options['cellSelector'], $selType);
             } else {
                 // 使用直接子元素作为单元格
                 $cellElements = $row->children();

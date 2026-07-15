@@ -157,7 +157,7 @@ class Query
      */
     public const PATTERN_PSEUDO_ELEMENT = '/::([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/';
     public const PATTERN_PSEUDO_CLASS = '/:([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/';
-    public const PATTERN_ATTRIBUTE = '/\[([a-zA-Z0-9_-]+)([*~|^$]?=)?([\"\']?)(.*?)\3\]/';
+    public const PATTERN_ATTRIBUTE = '/\[([a-zA-Z0-9_-]+)([*~|^$!]?=)?([\"\']?)(.*?)\3\]/';
     public const PATTERN_ID = '/#([a-zA-Z0-9_-]+)/';
     public const PATTERN_CLASS = '/\.([a-zA-Z0-9_-]+)/';
     public const PATTERN_XPATH_ABSOLUTE = '/^\//';
