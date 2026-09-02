@@ -6,18 +6,21 @@
 
 ## 特性
 
-- ✅ **完整的 CSS3 选择器支持** - 支持 150+ 种 CSS 选择器类型
-- ✅ **原生 XPath 支持** - 可直接使用 XPath 表达式查询
-- ✅ **丰富的伪类** - 支持 100+ 种伪类选择器
-- ✅ **伪元素支持** - 支持 `::text` 和 `::attr()` 伪元素
+- ✅ **现代 CSS 选择器支持** - 覆盖 CSS2/CSS3/CSS4 特性，含 `:is()`/`:where()`/`:has()`/`:not()` 复杂与列表语法、`nth-child(An+B of S)` 过滤、`[attr="v" i]` 大小写不敏感属性
+- ✅ **原生 XPath 支持** - 可直接使用 XPath 1.0 表达式查询（含命名空间、轴、文本/注释/CDATA 节点）
+- ✅ **丰富的伪类** - 结构伪类、表单伪类、逻辑组合伪类、关系伪类共 100+ 种
+- ✅ **伪元素支持** - 支持 `::text`、`::attr(name)`、`::html` 伪元素，从匹配元素提取文本/属性/HTML（支持上下文节点）
 - ✅ **扩展选择器功能** - 文本长度匹配、属性长度/数量选择器、基于深度的选择器
-- ✅ **正则表达式支持** - 强大的正则表达式匹配和数据提取功能
+- ✅ **正则表达式支持** - 强大的正则表达式匹配和数据提取功能（PCRE 语法，支持命名捕获组、属性/文本/HTML 三种作用域）
 - ✅ **表格数据提取** - 重构后的表格处理，严格分离表头表体，避免数据混杂
 - ✅ **列表数据提取** - 支持嵌套列表递归提取数据
 - ✅ **矩阵数据提取** - 重构后的矩阵数据处理，给出每行每列数据 queryMatrix
 - ✅ **表单数据提取** - 提取表单字段数据，返回字段名与值的关联数组
 - ✅ **链接/图片数据提取** - 提取链接和图片的结构化数据
-- ✅ **智能选择器类型** - findWithFallback 支持 css/xpath/regex/table/list/form/link/image/text/json 10种选择器类型
+- ✅ **智能选择器类型** - findWithFallback 支持 css/xpath/regex/table/list/form/link/image/text/value/html/json 12 种选择器类型，并兼容字符串简写与 ::text / ::attr() / ::attr(name) 伪元素
+- ✅ **节点关系遍历** - closest()/parents()/ancestors()/siblings()/next()/previous()/querySelector() 等
+- ✅ **节点包装操作** - wrap()/unwrap()/replaceWith() 支持传入 HTML 字符串片段
+- ✅ **类型安全的节点包装** - 导入/克隆的节点始终保留 Element/Text/Comment 等具体类型，链式调用不会因匿名类丢失方法
 - ✅ **JSON 数据处理** - 支持 JSON 字符串/数组/对象的解析和提取
 - ✅ **链式调用** - 流畅的 API 设计，支持链式操作
 - ✅ **PHP 8.2+ 类型系统** - 完整的类型注解，更好的 IDE 支持
@@ -165,30 +168,49 @@ $element->addClass('class1')
 **属性选择器：**
 - `[attr]` - 包含属性
 - `[attr=value]` - 属性等于
+- `[attr!=value]` - 属性不等于
 - `[attr~=value]` - 属性包含单词
 - `[attr|=value]` - 属性等于或以...开头
 - `[attr^=value]` - 属性以...开头
 - `[attr$=value]` - 属性以...结尾
 - `[attr*=value]` - 属性包含
+- `[attr="value" i]` - **大小写不敏感匹配**（CSS4，等价 `s` 显式区分大小写）
 
-**伪类（60+ 种）：**
-- 结构伪类：`:first-child`, `:last-child`, `:nth-child(n)` 等
-- 内容伪类：`:contains(text)`, `:has(selector)`, `:empty` 等
-- 表单伪类：`:enabled`, `:disabled`, `:checked`, `:required` 等
-- 表单元素伪类：`:text`, `:password`, `:checkbox`, `:radio` 等
-- HTML 元素伪类：`:header`, `:input`, `:button`, `:link` 等
-- 位置伪类：`:first`, `:last`, `:even`, `:odd`, `:eq(n)` 等
-- 可见性伪类：`:visible`, `:hidden`
+**逻辑组合伪类（CSS4）：**
+- `:is(a, b, c)` - 匹配括号内任一选择器
+- `:where(a, b, c)` - 同 `:is()`，特异性恒为 0
+- `:not(.a)` / `:not(.a .b)` / `:not(div, span)` - 否定单个/含组合器/列表选择器
+
+**结构伪类：**
+- `:first-child` `:last-child` `:only-child`
+- `:nth-child(An+B)` `:nth-last-child(An+B)`（`even`/`odd`/数字/`2n+1`）
+- **`nth-child(An+B of S)`** - 在匹配 `S` 的候选集合中定位（CSS4）
+- `:first-of-type` `:last-of-type` `:only-of-type`
+- `:nth-of-type(An+B)` `:nth-last-of-type(An+B)`
+- `:root` `:empty` `:contains(text)`
+
+**关系伪类（CSS4）：**
+- `:has(selector)` - 含后代匹配
+- `:has(> selector)` - 含直接子代匹配
+- `:has(+ selector)` / `:has(~ selector)` - 含后续兄弟匹配
+
+**表单伪类：** `:enabled` `:disabled` `:checked` `:required` `:optional` `:read-only` `:read-write` `:selected` `:text` `:password` `:checkbox` `:radio` 等
+
+**元素/位置伪类：** `:header` `:input` `:button` `:link` `:first` `:last` `:even` `:odd` `:eq(n)` `:gt(n)` `:lt(n)` `:parent` `:visible` `:hidden`
 
 **伪元素：**
 - `::text` - 获取元素文本内容
 - `::attr(name)` - 获取元素属性值
+- `::html` - 获取元素内部 HTML
+
+> 完整选择器语法与示例见 **[docs/SELECTORS.md](docs/SELECTORS.md)**。
 
 ### XPath 选择器
 
 - 完整的 XPath 1.0 支持
 - 所有 XPath 函数：`contains()`, `starts-with()`, `position()`, `last()` 等
 - 所有 XPath 轴和运算符
+- 命名空间、文本节点 `//text()`、注释 `//comment()`、CDATA `//child::node()[self::cdata-section]` 查询
 
 ```php
 // XPath 示例
@@ -292,12 +314,25 @@ $allTables = $doc->extractTable(null);
 $tableElement = $doc->first('table');
 $tableData = $doc->extractTable($tableElement);
 
-// findWithFallback 回退查找（支持 10 种选择器类型）
+// findWithFallback 回退查找（支持 12 种选择器类型，并兼容字符串简写）
 $titles = $doc->findWithFallback([
     ['selector' => 'h1.title'],
     ['selector' => '//h1[@class="title"]', 'type' => 'xpath'],
     ['selector' => '/<h1[^>]*class="title"[^>]*>/i', 'type' => 'regex', 'extractMode' => 'text'],
 ]);
+
+// 字符串简写（按先后顺序回退，命中任一即返回）
+$title = $doc->findWithFallback(['h1.title', 'h1', 'p.description']);
+
+// 提取属性 / 文本 / 值 / 内部 HTML（覆盖全部 DOM 操作）
+$href   = $doc->findWithFallback([['selector' => 'a', 'type' => 'css', 'attribute' => 'href']]);
+$href2  = $doc->findWithFallback([['selector' => 'a::attr(href)', 'type' => 'css']]);
+$texts  = $doc->findWithFallback([['selector' => '.desc::text', 'type' => 'css']]);
+$values = $doc->findWithFallback([['selector' => 'input', 'type' => 'value']]);
+$htmls  = $doc->findWithFallback([['selector' => '.content', 'type' => 'html']]);
+
+// findFirstWithFallback 返回单个节点（或属性/文本标量），同样支持上述所有类型
+$first = $doc->findFirstWithFallback(['h1.title', 'h1']);
 
 // 提取表格数据（table 类型）
 $tableData = $doc->findWithFallback([
@@ -394,11 +429,25 @@ $lastChild = $element->lastChild();
 $siblings = $element->siblings();
 $index = $element->index();
 
-// 元素操作
+// 关系遍历（新增）
+$closest   = $element->closest('div');          // 最近的祖先（含自身）匹配选择器
+$ancestors = $element->ancestors();             // 所有祖先元素（由近及远）
+$parents   = $element->parents('.box');         // 按选择器过滤的祖先
+$nextEl    = $element->next();                  // 后一个兄弟元素
+$prevEl    = $element->previous();              // 前一个兄弟元素
+$matched   = $element->querySelectorAll('.item'); // 相对当前元素的后代查询
+$one       = $element->querySelector('.item');   // 相对当前元素的首个后代
+
+// 元素操作（append/prepend/before/after/replaceWith 均支持 HTML 字符串片段）
 $element->append($newElement);
+$element->append('<span>raw html</span>');      // 直接插入 HTML 字符串
 $element->prepend($newElement);
 $element->before($newElement);
 $element->after($newElement);
+$element->replaceWith('<p>replaced</p>');       // 用 HTML 字符串替换
+$wrapper = $element->wrap('<div class="wrap"></div>'); // 用新父元素包裹
+$element->unwrap();                              // 解除当前元素包装（保留子节点）
+$element->setInnerHtml('<b>new</b>');            // 设置内部 HTML（HTML5 安全）
 $element->remove();
 $element->empty();
 $cloned = $element->clone();
@@ -570,6 +619,9 @@ foreach ($rows as $row) {
    $doc->find('div[id="main-content"]');
    ```
 
+4. **XPath 对象缓存** - 同一文档的重复查询复用已编译的 XPath 对象（v2.1.0 起默认开启），
+   连续大规模查询（如循环中按相同选择器提取）无需手动缓存即可获得明显加速。
+
 ## 测试
 
 运行测试套件：
@@ -605,8 +657,8 @@ MIT License
 
 ---
 
-*版本: 2.0.0*  
-*最后更新: 2026-05-14*
+*版本: 2.1.0*  
+*最后更新: 2026-09-01*
 
 ---
 
@@ -616,15 +668,19 @@ MIT License
 
 ```php
 [
-    'selector'       => 'string',     // CSS/XPath/正则 选择器表达式
-    'type'           => 'string',     // css|xpath|regex|table|list|form|link|image|text|json
-    'attribute'      => 'string|null', // 仅 type=regex，匹配的属性名
+    'selector'       => 'string',     // CSS/XPath/正则 选择器表达式（也支持 ::text / ::attr(name) 伪元素）
+    'type'           => 'string',     // css|xpath|regex|table|list|form|link|image|text|value|html|json|textby
+    'attribute'      => 'string|null', // type=regex 时的匹配属性名；或 css 下显式指定提取的属性名
     'extractMode'    => 'string|null', // 仅 type=regex: elements|text|attr|match
     'group'          => 'int|null',    // 仅 extractMode=match，分组索引
     'location'       => 'array|null',  // 仅 type=regex，多分组提取配置
+    'scope'          => 'string|null', // 仅 type=textby，按文本查找时的作用域选择器（默认 *）
     'extractOptions' => 'array|null',  // 仅 type=table|list|text，提取选项
 ]
 ```
+
+> 提示：`findWithFallback` / `findFirstWithFallback` 的 `selectors` 参数每个元素既可以是上述关联数组，
+> 也可以是纯字符串（等价于 `['selector' => '<字符串>']`，按顺序回退，命中任一即返回）。
 
 ### extractTable 选项
 
@@ -684,6 +740,23 @@ $options = [
 | `extractList()` | 提取列表 | `(list=null, options=[])` |
 | `extractFormData()` | 提取表单 | `(form=null)` |
 | `findWithFallback()` | 回退查找 | `(selectors, contextNode=null, getFirst=true)` |
+| `findFirstWithFallback()` | 首个回退 | `(selectors, contextNode=null)` |
 | `queryMatrix()` | 矩阵数据 | `(container='div', options=[])` |
+
+### Element 类新增/增强方法速查
+
+| 方法 | 功能 | 说明 |
+|------|------|------|
+| `closest()` | 最近祖先 | `(selector, type='css')` 含自身，向上查找匹配 |
+| `ancestors()` | 全部祖先 | 由近及远返回 Element 数组 |
+| `parents()` | 过滤祖先 | `(selector='', type='css')` 按选择器过滤 |
+| `siblings()` | 兄弟元素 | 不含自身 |
+| `next()` / `previous()` | 兄弟元素 | 后/前一个兄弟 Element |
+| `querySelector()` / `querySelectorAll()` | 相对查询 | 以当前元素为上下文的 CSS 查询 |
+| `wrap()` / `unwrap()` | 包装/解包 | `wrap(string\|Element)` 用新父元素包裹；`unwrap()` 保留子节点 |
+| `replaceWith()` | 替换 | 支持 Element / DOMNode / HTML 字符串 / 数组 |
+| `append()` / `prepend()` / `before()` / `after()` | 插入 | 均支持 HTML 字符串片段 |
+| `setInnerHtml()` | 内部 HTML | HTML5 安全，正确解析 void 元素与实体 |
+| `getByText()` | 相对文本查找 | 以当前元素为上下文的 `findByText()` |
 
 详细完整参数说明请参考 `src/docs/RULE_GUIDE.md`（选择器规则说明文档）和 `src/docs/USER_GUIDE.md`（完整使用指南）。

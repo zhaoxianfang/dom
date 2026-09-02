@@ -101,12 +101,6 @@ class Element extends Node
      */
     public function matches(string $selector, string|bool $typeOrStrict = false): bool
     {
-        // 兼容旧版 API：如果第二个参数是布尔值，则视为 strict 模式
-        $strict = false;
-
-        if (is_bool($typeOrStrict)) {
-            $strict = $typeOrStrict;
-        }
         if (! $this->node instanceof DOMElement) {
             return false;
         }
@@ -115,73 +109,171 @@ class Element extends Node
             return true;
         }
 
-        if (! $strict) {
-            $innerHtml = $this->html();
-            $html = "<root>$innerHtml</root>";
+        $type = is_string($typeOrStrict) ? $typeOrStrict : Query::TYPE_CSS;
 
-            $selector = 'root > '.trim($selector);
+        // 简单选择器（仅 tag/id/class/属性，无伪类）走快速严格的本地比较
+        if (is_bool($typeOrStrict)) {
+            try {
+                $segments = Query::parseSelector($selector);
+                $segment = $segments[0] ?? [];
 
-            $document = new Document;
+                if (! array_key_exists('tag', $segment)) {
+                    throw new RuntimeException('Tag name must be specified');
+                }
+                if (! empty($segment['pseudo'])) {
+                    // 含伪类，快速分支无法处理，交由下方 XPath 逻辑
+                    throw new RuntimeException('Pseudo-class not supported in fast path');
+                }
 
-            $document->loadHtml($html);
-
-            return $document->has($selector);
-        }
-
-        $segments = Query::parseSelector($selector);
-        $segment = $segments[0] ?? [];
-
-        if (! array_key_exists('tag', $segment)) {
-            throw new RuntimeException(sprintf('Tag name must be specified in %s', $selector));
-        }
-
-        if ($segment['tag'] !== $this->tagName() && $segment['tag'] !== '*') {
-            return false;
-        }
-
-        // 仅当选择器显式指定了 id 时才校验 id（元素自带额外 id 不应导致不匹配）；
-        // 元素缺少属性时 getAttribute 返回 null，需与空字符串统一比较
-        $segmentId = $segment['id'] ?? '';
-        if ($segmentId !== '' && $segmentId !== ($this->getAttribute('id') ?? '')) {
-            return false;
-        }
-
-        $classes = $this->hasAttribute('class')
-            ? array_filter(explode(' ', trim($this->getAttribute('class'))), fn($c) => $c !== '')
-            : [];
-
-        // 选择器要求的所有类名都必须在元素中存在（元素可包含额外类名）
-        $segmentClasses = $segment['classes'] ?? [];
-        if (count(array_diff($segmentClasses, $classes)) > 0) {
-            return false;
-        }
-
-        // 严格匹配属性（支持存在性、等于、不等于）
-        foreach ($segment['attributes'] ?? [] as $attr) {
-            $name = $attr['name'] ?? '';
-            $operator = $attr['operator'] ?? null;
-            $value = $attr['value'] ?? null;
-            $has = $this->hasAttribute($name);
-
-            if ($operator === '!=') {
-                // 属性存在且值等于指定值时不匹配
-                if ($has && $this->getAttribute($name) === $value) {
+                if ($segment['tag'] !== $this->tagName() && $segment['tag'] !== '*') {
                     return false;
                 }
-            } elseif ($operator === null || $operator === '') {
-                // 仅要求属性存在
-                if (! $has) {
+
+                // 仅当选择器显式指定了 id 时才校验 id（元素自带额外 id 不应导致不匹配）；
+                // 元素缺少属性时 getAttribute 返回 null，需与空字符串统一比较
+                $segmentId = $segment['id'] ?? '';
+                if ($segmentId !== '' && $segmentId !== ($this->getAttribute('id') ?? '')) {
                     return false;
                 }
-            } else {
-                // 要求属性存在且值相等
-                if (! $has || $this->getAttribute($name) !== $value) {
+
+                $classes = $this->hasAttribute('class')
+                    ? array_filter(explode(' ', trim($this->getAttribute('class'))), fn($c) => $c !== '')
+                    : [];
+
+                // 选择器要求的所有类名都必须在元素中存在（元素可包含额外类名）
+                $segmentClasses = $segment['classes'] ?? [];
+                if (count(array_diff($segmentClasses, $classes)) > 0) {
                     return false;
                 }
+
+                // 严格匹配属性（支持存在性、等于、不等于）
+                foreach ($segment['attributes'] ?? [] as $attr) {
+                    $name = $attr['name'] ?? '';
+                    $operator = $attr['operator'] ?? null;
+                    $value = $attr['value'] ?? null;
+                    $has = $this->hasAttribute($name);
+
+                    if ($operator === '!=') {
+                        if ($has && $this->getAttribute($name) === $value) {
+                            return false;
+                        }
+                    } elseif ($operator === null || $operator === '') {
+                        if (! $has) {
+                            return false;
+                        }
+                    } else {
+                        if (! $has || $this->getAttribute($name) !== $value) {
+                            return false;
+                        }
+                    }
+                }
+
+                return true;
+            } catch (RuntimeException $e) {
+                // 选择器含伪类或无法被快速分支解析时，回退到 XPath 严格匹配
             }
         }
 
-        return true;
+        // XPath 严格匹配：在父节点上下文查询，仅当自身节点出现在结果中才匹配
+        // （注意：绝不能把子元素包进 <root> 再判断，那会误判「后代匹配」为「自身匹配」）
+        $context = ($this->node->parentNode instanceof DOMElement) ? $this->node->parentNode : null;
+        $document = Document::getFromDomDocument($this->node->ownerDocument);
+        if ($document === null) {
+            return false;
+        }
+
+        $elements = $document->find($selector, $type, $context);
+        foreach ($elements as $element) {
+            if ($element instanceof Node && $element->getNode() === $this->node) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 将当前元素包装进一个新的父元素
+     * 
+     * 例：$el->wrap('<div class="wrap"></div>') 会把 $el 移到新 div 内部。
+     * 
+     * @param  string|Element  $wrapper  包装元素（HTML 字符串或已存在的 Element）
+     * @return Element 新建的包装元素
+     */
+    public function wrap(string|Element $wrapper): Element
+    {
+        if (is_string($wrapper)) {
+            // 解析 HTML 字符串，提取其第一个元素作为包装容器
+            $wrapperDoc = $this->ownerDocument();
+            $encoding = $wrapperDoc->getEncoding();
+            $tmp = new \DOMDocument($encoding);
+            $tmp->preserveWhiteSpace = false;
+            @$tmp->loadHTML(
+                '<?xml encoding="' . $encoding . '" ?>' . $wrapper,
+                \zxf\Dom\Document::HTML_LOAD_OPTIONS
+            );
+            $extracted = null;
+            foreach ($tmp->getElementsByTagName('body')->item(0)?->childNodes ?? [] as $child) {
+                if ($child instanceof \DOMElement) {
+                    $extracted = $child;
+                    break;
+                }
+            }
+            if ($extracted === null) {
+                throw new InvalidArgumentException('包装 HTML 字符串未解析出任何元素。');
+            }
+            $wrapperEl = new Element($extracted);
+        } else {
+            $wrapperEl = $wrapper;
+        }
+
+        $parent = $this->node->parentNode;
+        if ($parent === null) {
+            throw new RuntimeException('无法包装：当前节点没有父节点。');
+        }
+
+        $imported = $parent->ownerDocument->importNode($wrapperEl->getNode(), true);
+        $parent->replaceChild($imported, $this->node);
+        $imported->appendChild($this->node);
+
+        return new Element($imported);
+    }
+
+    /**
+     * 移除当前元素的包装（用其所有子节点替换自身）
+     * 
+     * @return self
+     */
+    public function unwrap(): self
+    {
+        $parent = $this->node->parentNode;
+        if ($parent === null) {
+            return $this;
+        }
+
+        $children = [];
+        foreach ($this->node->childNodes as $child) {
+            $children[] = $child;
+        }
+
+        foreach ($children as $child) {
+            $parent->insertBefore($child, $this->node);
+        }
+
+        $parent->removeChild($this->node);
+
+        return $this;
+    }
+
+    /**
+     * 相对于当前元素按文本内容查找后代
+     * 
+     * @param  string  $text  要查找的文本
+     * @return array<int, Element>
+     */
+    public function getByText(string $text): array
+    {
+        return $this->findByText($text);
     }
 
     /**
@@ -222,13 +314,14 @@ class Element extends Node
     /**
      * 获取所属文档
      *
-     * @return Document|null 文档对象
+     * @return Document 文档对象
+     * @throws RuntimeException 当节点尚未挂载到文档时
      */
-    public function ownerDocument(): ?Document
+    public function ownerDocument(): Document
     {
         $domDocument = $this->node->ownerDocument;
         if ($domDocument === null) {
-            return null;
+            throw new RuntimeException('当前节点尚未挂载到文档。');
         }
 
         return Document::getFromDomDocument($domDocument);

@@ -14,6 +14,7 @@ use DOMText;
 use InvalidArgumentException;
 use LogicException;
 use RuntimeException;
+use zxf\Dom\Exceptions\InvalidSelectorException;
 use zxf\Dom\Selectors\Query;
 
 /**
@@ -57,6 +58,21 @@ abstract class Node
     public function getNode(): DOMNode
     {
         return $this->node;
+    }
+
+    /**
+     * 获取所属文档对象
+     * 
+     * @return Document
+     */
+    public function ownerDocument(): Document
+    {
+        $owner = $this->node->ownerDocument;
+        if ($owner === null) {
+            throw new RuntimeException('当前节点尚未挂载到文档。');
+        }
+
+        return Document::getFromDomDocument($owner);
     }
 
     /**
@@ -232,6 +248,34 @@ abstract class Node
     }
 
     /**
+     * 获取节点的内部 HTML（不含自身标签）
+     * 
+     * @return string
+     */
+    public function innerHtml(): string
+    {
+        $doc = $this->node->ownerDocument;
+        if ($doc === null || ! $this->node instanceof DOMElement) {
+            return '';
+        }
+
+        $result = '';
+        foreach ($this->node->childNodes as $child) {
+            $result .= $doc->saveHTML($child);
+        }
+
+        return $result;
+    }
+
+    /**
+     * innerHtml() 的别名
+     */
+    public function getInnerHtml(): string
+    {
+        return $this->innerHtml();
+    }
+
+    /**
      * 获取节点的文本内容
      * 
      * @return string
@@ -372,6 +416,56 @@ abstract class Node
     }
 
     /**
+     * 获取节点的「值」
+     *
+     * - 表单控件：input/textarea 取 value 属性或文本内容，select 取选中 option 的文本，
+     *   checkbox/radio 取 value 属性，未选中返回空字符串；
+     * - 其它元素：等同 textContent。
+     *
+     * @return string
+     */
+    public function value(): string
+    {
+        if (! $this->node instanceof DOMElement) {
+            return $this->node->textContent ?? '';
+        }
+
+        $tag = strtolower($this->node->nodeName);
+
+        if ($tag === 'input') {
+            $type = strtolower($this->node->getAttribute('type') ?: 'text');
+            if (in_array($type, ['checkbox', 'radio'], true)) {
+                return $this->node->hasAttribute('checked') ? ($this->node->getAttribute('value') ?: 'on') : '';
+            }
+            return $this->node->getAttribute('value') ?? '';
+        }
+
+        if ($tag === 'textarea' || $tag === 'button') {
+            return $this->node->textContent ?? '';
+        }
+
+        if ($tag === 'select') {
+            foreach ($this->node->getElementsByTagName('option') as $option) {
+                if ($option->hasAttribute('selected')) {
+                    return $option->getAttribute('value') ?? $option->textContent ?? '';
+                }
+            }
+            $first = $this->node->getElementsByTagName('option')->item(0);
+            return $first !== null ? ($first->getAttribute('value') ?: $first->textContent ?? '') : '';
+        }
+
+        return $this->node->textContent ?? '';
+    }
+
+    /**
+     * value() 的别名
+     */
+    public function getValue(): string
+    {
+        return $this->value();
+    }
+
+    /**
      * 设置节点的 HTML 内容
      * 
      * @param  string  $html  HTML 内容
@@ -388,17 +482,14 @@ abstract class Node
             $this->node->removeChild($this->node->firstChild);
         }
 
-        // 创建文档片段并加载 HTML
-        $fragment = $this->node->ownerDocument->createDocumentFragment();
-        
-        // 防止 HTML5 标签自动添加
-        libxml_use_internal_errors(true);
-        $loaded = $fragment->appendXML($html);
-        libxml_clear_errors();
-
-        if ($loaded) {
-            $this->node->appendChild($fragment);
+        if ($html === '') {
+            return $this;
         }
+
+        // 创建文档片段并以 HTML 语义解析（兼容 HTML5 / void 元素 / 实体）
+        $fragment = $this->createFragment($html);
+
+        $this->node->appendChild($fragment);
 
         return $this;
     }
@@ -430,7 +521,7 @@ abstract class Node
      * @param  Node|DOMNode|array  $nodes  要插入的节点
      * @return Node|Node[]
      */
-    public function before(Node|DOMNode|array $nodes): Node|array
+    public function before(Node|DOMNode|string|array $nodes): Node|array
     {
         $parent = $this->node->parentNode;
         
@@ -449,10 +540,12 @@ abstract class Node
         foreach (array_reverse($nodes) as $node) {
             if ($node instanceof Node) {
                 $node = $node->getNode();
+            } elseif (is_string($node)) {
+                $node = $this->createFragment($node);
             }
 
             if (! $node instanceof DOMNode) {
-                throw new InvalidArgumentException('参数必须是 Node 或 DOMNode 的实例。');
+                throw new InvalidArgumentException('参数必须是 Node、DOMNode 实例或 HTML 字符串。');
             }
 
             $node = $document->importNode($node, true);
@@ -466,10 +559,12 @@ abstract class Node
     /**
      * 在当前节点后插入节点
      * 
-     * @param  Node|DOMNode|array  $nodes  要插入的节点
+     * 支持传入 Node/DOMNode 实例或 HTML 字符串（字符串会被解析为 DOM 片段后插入）。
+     * 
+     * @param  Node|DOMNode|string|array  $nodes  要插入的节点或 HTML 字符串
      * @return Node|Node[]
      */
-    public function after(Node|DOMNode|array $nodes): Node|array
+    public function after(Node|DOMNode|string|array $nodes): Node|array
     {
         $parent = $this->node->parentNode;
         
@@ -489,10 +584,12 @@ abstract class Node
         foreach ($nodes as $node) {
             if ($node instanceof Node) {
                 $node = $node->getNode();
+            } elseif (is_string($node)) {
+                $node = $this->createFragment($node);
             }
 
             if (! $node instanceof DOMNode) {
-                throw new InvalidArgumentException('参数必须是 Node 或 DOMNode 的实例。');
+                throw new InvalidArgumentException('参数必须是 Node、DOMNode 实例或 HTML 字符串。');
             }
 
             $node = $document->importNode($node, true);
@@ -512,10 +609,10 @@ abstract class Node
     /**
      * 在当前节点开头插入子节点
      * 
-     * @param  Node|DOMNode|array  $nodes  要插入的节点
+     * @param  Node|DOMNode|string|array  $nodes  要插入的节点或 HTML 字符串
      * @return Node|Node[]
      */
-    public function prepend(Node|DOMNode|array $nodes): Node|array
+    public function prepend(Node|DOMNode|string|array $nodes): Node|array
     {
         return $this->prependChild($nodes);
     }
@@ -523,10 +620,10 @@ abstract class Node
     /**
      * 在当前节点末尾添加子节点
      * 
-     * @param  Node|DOMNode|array  $nodes  要添加的节点
+     * @param  Node|DOMNode|string|array  $nodes  要添加的节点或 HTML 字符串
      * @return Node|Node[]
      */
-    public function append(Node|DOMNode|array $nodes): Node|array
+    public function append(Node|DOMNode|string|array $nodes): Node|array
     {
         return $this->appendChild($nodes);
     }
@@ -534,10 +631,10 @@ abstract class Node
     /**
      * 添加子节点到开头
      * 
-     * @param  Node|DOMNode|array  $nodes  要添加的节点
+     * @param  Node|DOMNode|string|array  $nodes  要添加的节点或 HTML 字符串
      * @return Node|Node[]
      */
-    public function prependChild(Node|DOMNode|array $nodes): Node|array
+    public function prependChild(Node|DOMNode|string|array $nodes): Node|array
     {
         $returnArray = is_array($nodes);
         if (! is_array($nodes)) {
@@ -552,10 +649,12 @@ abstract class Node
         foreach ($nodes as $node) {
             if ($node instanceof Node) {
                 $node = $node->getNode();
+            } elseif (is_string($node)) {
+                $node = $this->createFragment($node);
             }
 
             if (! $node instanceof DOMNode) {
-                throw new InvalidArgumentException('参数必须是 Node 或 DOMNode 的实例。');
+                throw new InvalidArgumentException('参数必须是 Node、DOMNode 实例或 HTML 字符串。');
             }
 
             $node = $document->importNode($node, true);
@@ -576,10 +675,10 @@ abstract class Node
     /**
      * 添加子节点到末尾
      * 
-     * @param  Node|DOMNode|array  $nodes  要添加的节点
+     * @param  Node|DOMNode|string|array  $nodes  要添加的节点或 HTML 字符串
      * @return Node|Node[]
      */
-    public function appendChild(Node|DOMNode|array $nodes): Node|array
+    public function appendChild(Node|DOMNode|string|array $nodes): Node|array
     {
         $returnArray = is_array($nodes);
         if (! is_array($nodes)) {
@@ -592,10 +691,12 @@ abstract class Node
         foreach ($nodes as $node) {
             if ($node instanceof Node) {
                 $node = $node->getNode();
+            } elseif (is_string($node)) {
+                $node = $this->createFragment($node);
             }
 
             if (! $node instanceof DOMNode) {
-                throw new InvalidArgumentException('参数必须是 Node 或 DOMNode 的实例。');
+                throw new InvalidArgumentException('参数必须是 Node、DOMNode 实例或 HTML 字符串。');
             }
 
             $node = $document->importNode($node, true);
@@ -609,14 +710,57 @@ abstract class Node
     /**
      * 替换当前节点
      * 
-     * @param  Node|DOMNode|array  $nodes  新节点
+     * 支持传入 Node/DOMNode 实例或 HTML 字符串。传入数组时，当前节点会被替换为数组中所有节点的序列。
+     * 
+     * @param  Node|DOMNode|string|array  $nodes  新节点或 HTML 字符串
      * @return self
      */
-    public function replaceWith(Node|DOMNode|array $nodes): self
+    public function replaceWith(Node|DOMNode|string|array $nodes): self
     {
         $this->after($nodes);
         $this->remove();
         return $this;
+    }
+
+    /**
+     * 创建当前文档下的 HTML 片段节点
+     * 
+     * 采用与文档 loadHtml 一致的解析参数，保证 HTML5/void 元素语义正确。
+     * 
+     * @param  string  $html  HTML 片段
+     * @return DOMDocumentFragment
+     */
+    protected function createFragment(string $html): DOMDocumentFragment
+    {
+        $owner = $this->node->ownerDocument;
+        if ($owner === null) {
+            throw new RuntimeException('当前节点尚未挂载到文档，无法创建 HTML 片段。');
+        }
+
+        $document = Document::getFromDomDocument($owner);
+        $fragment = $owner->createDocumentFragment();
+
+        if ($html === '') {
+            return $fragment;
+        }
+
+        // 以 HTML 语义解析片段（兼容 void 元素 / 实体 / 中文），
+        // 再用 importNode 将解析结果并入当前文档片段，避免 appendXML 对 HTML 语法（<br> 等）失效。
+        $encoding = $document->getEncoding();
+        $tmp = new DOMDocument($encoding);
+        $tmp->preserveWhiteSpace = false;
+        $fragmentHtml = '<?xml encoding="' . $encoding . '" ?>'
+            . '<div>' . $html . '</div>';
+        @$tmp->loadHTML($fragmentHtml, Document::HTML_LOAD_OPTIONS);
+
+        $root = $tmp->getElementsByTagName('div')->item(0);
+        if ($root !== null) {
+            foreach ($root->childNodes as $child) {
+                $fragment->appendChild($owner->importNode($child, true));
+            }
+        }
+
+        return $fragment;
     }
 
     /**
@@ -700,7 +844,147 @@ abstract class Node
     }
 
     /**
+     * 查找最近的祖先元素（含自身）匹配给定选择器
+     * 
+     * @param  string  $selector  CSS 或 XPath 选择器
+     * @param  string  $type  选择器类型
+     * @return Element|null
+     */
+    public function closest(string $selector, string $type = Query::TYPE_CSS): ?Element
+    {
+        $node = $this->node;
+        while ($node !== null) {
+            if ($node instanceof DOMElement) {
+                $element = new Element($node);
+                if ($element->matches($selector, $type)) {
+                    return $element;
+                }
+            }
+            $node = $node->parentNode;
+        }
+
+        return null;
+    }
+
+    /**
+     * 获取所有祖先元素（由近及远）
+     * 
+     * @return array<int, Element>
+     */
+    public function ancestors(): array
+    {
+        $result = [];
+        $node = $this->node->parentNode;
+        while ($node instanceof DOMElement) {
+            $result[] = new Element($node);
+            $node = $node->parentNode;
+        }
+
+        return $result;
+    }
+
+    /**
+     * 获取所有祖先元素（由近及远），可指定选择器过滤
+     * 
+     * @param  string  $selector  CSS 或 XPath 选择器
+     * @param  string  $type  选择器类型
+     * @return array<int, Element>
+     */
+    public function parents(string $selector = '', string $type = Query::TYPE_CSS): array
+    {
+        $all = $this->ancestors();
+        if ($selector === '') {
+            return $all;
+        }
+
+        return array_values(array_filter($all, fn (Element $el) => $el->matches($selector, $type)));
+    }
+
+    /**
+     * 获取所有兄弟元素（不含自身）
+     * 
+     * @return array<int, Element>
+     */
+    public function siblings(): array
+    {
+        $parent = $this->node->parentNode;
+        if (! $parent instanceof DOMElement) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($parent->childNodes as $child) {
+            if ($child instanceof DOMElement && $child !== $this->node) {
+                $result[] = new Element($child);
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * 获取后一个兄弟元素
+     * 
+     * @return Element|null
+     */
+    public function next(): ?Element
+    {
+        $node = $this->node->nextSibling;
+        while ($node !== null) {
+            if ($node instanceof DOMElement) {
+                return new Element($node);
+            }
+            $node = $node->nextSibling;
+        }
+
+        return null;
+    }
+
+    /**
+     * 获取前一个兄弟元素
+     * 
+     * @return Element|null
+     */
+    public function previous(): ?Element
+    {
+        $node = $this->node->previousSibling;
+        while ($node !== null) {
+            if ($node instanceof DOMElement) {
+                return new Element($node);
+            }
+            $node = $node->previousSibling;
+        }
+
+        return null;
+    }
+
+    /**
+     * 相对于当前节点执行 CSS 选择器查询（等价于 querySelectorAll）
+     * 
+     * @param  string  $selector  CSS 选择器
+     * @return array<int, Element>
+     */
+    public function querySelectorAll(string $selector): array
+    {
+        return $this->ownerDocument()->find($selector, Query::TYPE_CSS, $this->getNode());
+    }
+
+    /**
+     * 相对于当前节点执行 CSS 选择器查询，返回第一个匹配
+     * 
+     * @param  string  $selector  CSS 选择器
+     * @return Element|null
+     */
+    public function querySelector(string $selector): ?Element
+    {
+        return $this->ownerDocument()->first($selector, Query::TYPE_CSS, $this->getNode());
+    }
+
+    /**
      * 包装导入的节点
+     * 
+     * 元素节点统一包装为 Element，文本/注释等节点包装为对应的 Node 子类，
+     * 保证返回对象具备完整的类型方法，避免链式调用因匿名类丢失方法而崩溃。
      * 
      * @param  DOMNode  $node  导入的节点
      * @return Node
@@ -710,7 +994,19 @@ abstract class Node
         if ($node instanceof DOMElement) {
             return new Element($node);
         }
-        
+
+        if ($node instanceof DOMText) {
+            return new Text($node);
+        }
+
+        if ($node instanceof DOMComment) {
+            return new Comment($node);
+        }
+
+        if ($node instanceof DOMCdataSection) {
+            return new Cdata($node);
+        }
+
         return new class($node) extends Node {};
     }
 

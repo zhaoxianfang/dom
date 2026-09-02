@@ -153,11 +153,27 @@ class Query
     public const TYPE_TEXT = 'text';
 
     /**
+     * 按文本内容查找（findByText 风格）
+     */
+    public const TYPE_TEXT_BY = 'textby';
+
+    /**
+     * 表单元素值提取
+     */
+    public const TYPE_VALUE = 'value';
+
+    /**
+     * 内部 HTML 提取
+     */
+    public const TYPE_HTML = 'html';
+
+    /**
      * 常用正则表达式模式（优化性能，避免重复编译）
      */
-    public const PATTERN_PSEUDO_ELEMENT = '/::([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/';
-    public const PATTERN_PSEUDO_CLASS = '/:([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/';
-    public const PATTERN_ATTRIBUTE = '/\[([a-zA-Z0-9_-]+)([*~|^$!]?=)?([\"\']?)(.*?)\3\]/';
+    public const PATTERN_PSEUDO_ELEMENT = '/::([a-zA-Z0-9_-]+)(?:\(((?:[^()]+|(?R))*)\))?/';
+    public const PATTERN_PSEUDO_CLASS = '/:([a-zA-Z0-9_-]+)(?:\(((?:[^()]+|(?R))*)\))?/';
+    // 支持大小写不敏感修饰符： [attr="val" i] 或 [attr="val" s]
+    public const PATTERN_ATTRIBUTE = '/\[([a-zA-Z0-9_-]+)([*~|^$!]?=)?([\"\']?)(.*?)\3(\s*[is])?\]/';
     public const PATTERN_ID = '/#([a-zA-Z0-9_-]+)/';
     public const PATTERN_CLASS = '/\.([a-zA-Z0-9_-]+)/';
     public const PATTERN_XPATH_ABSOLUTE = '/^\//';
@@ -642,9 +658,95 @@ class Query
      * // CSS 组合选择器
      * $segments = Query::parseSelector('div.content > div.pages-date > span');
      */
+    /**
+     * 仅在「顶层」按空白分割后代选择器，跳过属性选择器 ([...]) 与
+     * 伪类参数 ((...)) 内部的空白。
+     *
+     * 现代选择器（如 [title="hello world"]、[class="A" i]、:not(.a .b)）内部
+     * 含合法空格，若直接 preg_split('/\s+/') 会破坏它们。
+     *
+     * @param  string  $selector  单个组合器片段
+     * @return array<int, string> 顶层按空白分割后的子选择器
+     */
+    protected static function splitTopLevelWhitespace(string $selector): array
+    {
+        $depth = 0;        // 括号 ([ 或 ( 的嵌套深度
+        $parts = [];
+        $buf = '';
+
+        for ($i = 0, $len = strlen($selector); $i < $len; $i++) {
+            $ch = $selector[$i];
+            if ($ch === '[' || $ch === '(') {
+                $depth++;
+                $buf .= $ch;
+            } elseif ($ch === ']' || $ch === ')') {
+                $depth = max(0, $depth - 1);
+                $buf .= $ch;
+            } elseif ($ch === ' ' || $ch === "\t" || $ch === "\n" || $ch === "\r") {
+                if ($depth === 0) {
+                    if ($buf !== '') {
+                        $parts[] = $buf;
+                        $buf = '';
+                    }
+                } else {
+                    $buf .= $ch;
+                }
+            } else {
+                $buf .= $ch;
+            }
+        }
+
+        if ($buf !== '') {
+            $parts[] = $buf;
+        }
+
+        return $parts;
+    }
+
+    /**
+     * 在「顶层」按组合器 (> + ~) 分割选择器，跳过属性选择器 ([...]) 与
+     * 伪类参数 ((...)) 内部的组合器。
+     *
+     * 例如 div:has(> span) 中的 > 属于 :has 参数，不应被当作选择器组合器。
+     *
+     * @param  string  $selector  CSS 选择器
+     * @return array<int, string> 按组合器分割后的选择器片段（含组合器标记）
+     */
+    protected static function splitCombinators(string $selector): array
+    {
+        $depth = 0;        // 括号 ([ 或 ( 的嵌套深度
+        $parts = [];
+        $buf = '';
+
+        for ($i = 0, $len = strlen($selector); $i < $len; $i++) {
+            $ch = $selector[$i];
+            if ($ch === '[' || $ch === '(') {
+                $depth++;
+                $buf .= $ch;
+            } elseif ($ch === ']' || $ch === ')') {
+                $depth = max(0, $depth - 1);
+                $buf .= $ch;
+            } elseif (($ch === '>' || $ch === '+' || $ch === '~') && $depth === 0) {
+                // 顶层组合器：若前后有空白一并消费，写入带标记的组合器片段
+                if (trim($buf) !== '') {
+                    $parts[] = trim($buf);
+                }
+                $parts[] = $ch;
+                $buf = '';
+            } else {
+                $buf .= $ch;
+            }
+        }
+
+        if (trim($buf) !== '') {
+            $parts[] = trim($buf);
+        }
+
+        return $parts;
+    }
+
     public static function parseSelector(string $selector): array
     {
-        $segments = [];
 
         // 处理以 / 开头的 XPath 风格路径（如 /html/body/div）
         if (preg_match(self::PATTERN_XPATH_ABSOLUTE, $selector)) {
@@ -677,14 +779,9 @@ class Query
             return $segments;
         }
 
-        // 使用更精确的正则表达式解析组合器
-        // 1. 首先用特殊标记替换 > + ~ 组合器（只在选择器之间替换）
-        $temp = preg_replace('/\s*([>+~])\s*/', chr(0) . '$1' . chr(0), $selector);
-        $temp = preg_replace('/^([>+~])\s*/', chr(0) . '$1' . chr(0), $temp);
-        $temp = preg_replace('/\s*([>+~])$/', chr(0) . '$1' . chr(0), $temp);
-
-        // 2. 用 chr(0) 分割
-        $parts = explode(chr(0), $temp);
+        // 使用更精确的方式解析组合器（> + ~），但必须跳过括号内/pseudo 参数内的组合器
+        // 例如 div:has(> span) 中的 > 属于 :has 参数，不应被当作选择器组合器
+        $parts = static::splitCombinators($selector);
 
         $selectorParts = [];
         $combinators = [];
@@ -701,7 +798,9 @@ class Query
             } else {
                 // 这个 part 可能包含空格分隔的后代选择器
                 // 例如 "div p" 或 ".container .col"
-                $subParts = preg_split('/\s+/', $part);
+                // 注意：属性选择器内部可能含空格（如 [title="hello world"] 或 [class="A" i]），
+                // 不能在括号内按空格分割，否则会破坏选择器。
+                $subParts = static::splitTopLevelWhitespace($part);
                 if (count($subParts) > 1) {
                     // 有多个子部分，说明是后代选择器
                     foreach ($subParts as $subPart) {
@@ -747,6 +846,7 @@ class Query
         $current = [
             'combinator' => '',
             'tag' => '*',
+            'namespace' => '',
             'id' => '',
             'classes' => [],
             'attributes' => [],
@@ -762,6 +862,7 @@ class Query
             $current = [
                 'combinator' => '',
                 'tag' => '*',
+                'namespace' => '',
                 'id' => '',
                 'classes' => [],
                 'attributes' => [],
@@ -799,10 +900,15 @@ class Query
         // 先提取属性（包含在 [] 中，避免与类/ID混淆）
         if (preg_match_all(self::PATTERN_ATTRIBUTE, $part, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $attr) {
+                $modifier = '';
+                if (! empty($attr[5])) {
+                    $modifier = strtolower(trim($attr[5]));
+                }
                 $current['attributes'][] = [
                     'name' => $attr[1],
                     'operator' => $attr[2] ?? null,
                     'value' => $attr[4] ?? null,
+                    'insensitive' => ($modifier === 'i'),
                 ];
             }
             $part = preg_replace('/\[[^\]]+\]/', '', $part);
@@ -820,10 +926,16 @@ class Query
             $part = preg_replace('/\.[a-zA-Z0-9_-]+/', '', $part);
         }
 
-        // 剩余部分是标签名
+        // 剩余部分是标签名（支持命名空间语法 ns|tag 与通配 *|tag）
         $part = trim($part);
-        if ($part !== '' && $part !== '') {
-            $current['tag'] = $part;
+        if ($part !== '' && $part !== '*') {
+            // 命名空间选择器：ns|tag 或 *|tag
+            if (preg_match('/^([*a-zA-Z][\w.-]*)\|([*a-zA-Z][\w.-]*)$/', $part, $ns)) {
+                $current['namespace'] = $ns[1] === '*' ? '*' : $ns[1];
+                $current['tag'] = $ns[2];
+            } else {
+                $current['tag'] = $part;
+            }
         }
     }
     /**
@@ -863,8 +975,23 @@ class Query
                 }
         }
 
-        // 标签名
-        $xpath .= $segment['tag'];
+        // 标签名（含命名空间：ns|tag / *|tag → 按 local-name 匹配，避免 XPath 前缀未注册问题）
+        $ns = $segment['namespace'] ?? '';
+        if ($ns !== '') {
+            if ($segment['tag'] === '*') {
+                // ns|* 或 *|*：命名空间通配降级为匹配所有元素（libxml 默认未注册命名空间前缀）
+                $xpath .= '*';
+            } elseif ($ns === '*') {
+                // 任意命名空间下的指定标签（XPath 1.0 无 *:tag 语法，用 local-name 表达）
+                $xpath .= sprintf("*[local-name()='%s']", $segment['tag']);
+            } else {
+                // 指定前缀的标签：同样按 local-name 匹配（不依赖 XPath 前缀注册，
+                // 因为 libxml 默认未注册 svg/math 等命名空间前缀）
+                $xpath .= sprintf("*[local-name()='%s']", $segment['tag']);
+            }
+        } else {
+            $xpath .= $segment['tag'];
+        }
         
         // 相邻兄弟选择器需要 [1] 条件
         if ($isAdjacentSibling) {
@@ -886,16 +1013,116 @@ class Query
         // 属性
         if (! empty($segment['attributes'])) {
             foreach ($segment['attributes'] as $attr) {
-                $xpath .= static::compileAttribute($attr);
+                $xpath .= static::compileAttribute($attr, $segment['tag'] ?? '*');
             }
         }
 
         // 伪类
         if (! empty($segment['pseudo'])) {
-            $xpath .= static::compilePseudo($segment['pseudo'], $segment['pseudoArg'] ?? '', $segment['tag'] ?? '*');
+            $pseudoName = $segment['pseudo'];
+            // :is() / :where() 需要把内部选择器列表编译为 XPath 条件组合
+            //（它们在语义上相当于把每个内部选择器作为独立段并取或，作用在「当前元素」上）
+            if (in_array($pseudoName, ['is', 'where'], true)) {
+                $xpath .= static::compileLogicalGroup($segment['pseudoArg'] ?? '', $segment['tag'] ?? '*');
+            } else {
+                $xpath .= static::compilePseudo($pseudoName, $segment['pseudoArg'] ?? '', $segment['tag'] ?? '*');
+            }
         }
 
         return $xpath;
+    }
+
+    /**
+     * 编译 :is() / :where() 逻辑组合伪类
+     *
+     * 将逗号分隔的选择器列表编译为 XPath 条件（or 组合），作用于「当前元素」。
+     * 例如 li:is(.a, .b) 编译为 [self::li and (.a 的条件 or .b 的条件)]，
+     * 其中内部选择器可含 tag/class/属性/伪类，但组合器（空格/>/+）相对当前元素无意义，
+     * 仅保留其 tag/class/属性/伪类约束（符合 :is 的「相对匹配」语义）。
+     *
+     * @param  string  $arg  内部选择器列表，如 ".a, .b" 或 "div, p.foo"
+     * @param  string  $tagName  外层元素标签名（:is 自身不带 tag 时用于约束）
+     * @return string XPath 条件（带方括号）
+     */
+    protected static function compileLogicalGroup(string $arg, string $tagName = '*'): string
+    {
+        $arg = trim($arg);
+        if ($arg === '') {
+            return '';
+        }
+
+        $selectors = array_map('trim', explode(',', $arg));
+        $conditions = [];
+
+        foreach ($selectors as $sel) {
+            if ($sel === '') {
+                continue;
+            }
+            // 解析内部选择器（允许嵌套伪类），将其编译为 XPath 段条件
+            $innerSegments = static::parseSelector($sel);
+            if (empty($innerSegments)) {
+                continue;
+            }
+            $innerSeg = $innerSegments[0];
+            // 仅保留 tag/class/属性/伪类约束（组合器在 :is 内无意义）
+            $cond = static::compileSegmentConditions($innerSeg);
+            if ($cond !== '') {
+                $conditions[] = $cond;
+            }
+        }
+
+        if (empty($conditions)) {
+            return '';
+        }
+
+        return sprintf('[(%s)]', implode(' or ', $conditions));
+    }
+
+    /**
+     * 仅编译选择器段的「约束条件」部分（不含组合器与标签名上下文），
+     * 用于 :is() / :where() / :not() 等逻辑组合伪类的内部选择器。
+     *
+     * @return string XPath 条件（不带外层方括号，多个条件以 and 连接）
+     */
+    protected static function compileSegmentConditions(array $segment): string
+    {
+        $conds = [];
+
+        if (! empty($segment['tag']) && $segment['tag'] !== '*') {
+            $conds[] = sprintf('self::%s', $segment['tag']);
+        }
+
+        if (! empty($segment['id'])) {
+            $conds[] = sprintf('@id="%s"', $segment['id']);
+        }
+
+        if (! empty($segment['classes'])) {
+            foreach ($segment['classes'] as $class) {
+                $conds[] = sprintf('contains(concat(" ", normalize-space(@class), " "), " %s ")', $class);
+            }
+        }
+
+        if (! empty($segment['attributes'])) {
+            foreach ($segment['attributes'] as $attr) {
+                $attrXpath = static::compileAttribute($attr);
+                // compileAttribute 返回 "[...]"，去掉方括号转为裸条件
+                $attrXpath = trim($attrXpath, '[]');
+                if ($attrXpath !== '') {
+                    $conds[] = $attrXpath;
+                }
+            }
+        }
+
+        if (! empty($segment['pseudo'])) {
+            $pseudoName = $segment['pseudo'];
+            if (in_array($pseudoName, ['is', 'where'], true)) {
+                $conds[] = trim(static::compileLogicalGroup($segment['pseudoArg'] ?? '', $segment['tag'] ?? '*'), '[]');
+            } else {
+                $conds[] = trim(static::compilePseudo($pseudoName, $segment['pseudoArg'] ?? '', $segment['tag'] ?? '*'), '[]');
+            }
+        }
+
+        return implode(' and ', $conds);
     }
 
     /**
@@ -925,26 +1152,55 @@ class Query
      * // data-id 不等于 2
      * $xpath = Query::compileAttribute(['name' => 'data-id', 'operator' => '!=', 'value' => '2']);
      */
-    protected static function compileAttribute(array $attr): string
+    /**
+     * 编译属性选择器
+     *
+     * 支持的属性选择器：
+     * - [attr] - 存在属性
+     * - [attr=value] - 完全匹配
+     * - [attr!=value] - 不匹配
+     * - [attr~=value] - 词列表匹配
+     * - [attr|=value] - 语言或前缀匹配
+     * - [attr^=value] - 前缀匹配
+     * - [attr$=value] - 后缀匹配
+     * - [attr*=value] - 包含匹配
+     * - [attr="value" i] - 不区分大小写匹配（通过 XPath translate 函数实现）
+     * - [attr="value" s] - 区分大小写匹配（默认行为）
+     *
+     * @param  array{name: string, operator: string|null, value: string|null, insensitive?: bool}  $attr  属性信息
+     * @param  string  $tagName  元素标签名（用于大小写不敏感转换的命名空间）
+     * @return string XPath 属性条件
+     */
+    protected static function compileAttribute(array $attr, string $tagName = '*'): string
     {
         $name = $attr['name'];
         $operator = $attr['operator'] ?? '';
         $value = $attr['value'] ?? '';
+        $insensitive = ! empty($attr['insensitive']);
+
+        // 大小写不敏感：用 translate 把属性值与比较值都转为小写
+        if ($insensitive) {
+            $lowerName = sprintf('translate(@%s, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")', $name);
+            $lowerValue = strtolower($value);
+        } else {
+            $lowerName = '@' . $name;
+            $lowerValue = $value;
+        }
 
         // XPath 1.0 不支持 ends-with，需要用 substring 实现
         if ($operator === '$=') {
-            return sprintf('[@%s and substring(@%s, string-length(@%s) - string-length("%s") + 1) = "%s"]',
-                $name, $name, $name, $value, $value);
+            return sprintf('[%s and substring(%s, string-length(%s) - string-length("%s") + 1) = "%s"]',
+                $lowerName, $lowerName, $lowerName, $lowerValue, $lowerValue);
         }
 
         return match ($operator) {
-            '^=' => sprintf('[starts-with(@%s, "%s")]', $name, $value),
-            '*=' => sprintf('[contains(@%s, "%s")]', $name, $value),
-            '~=' => sprintf('[contains(concat(" ", normalize-space(@%s), " "), " %s ")]', $name, $value), // 保持不变，这个语法是正确的
-            '|=' => sprintf('[@%s="%s" or starts-with(@%s, "%s-")]', $name, $value, $name, $value),
-            '=' => sprintf('[@%s="%s"]', $name, $value),
-            '!=' => sprintf('[@%s and @%s!="%s"]', $name, $name, $value), // 修复XPath 1.0语法
-            default => sprintf('[@%s]', $name),
+            '^=' => sprintf('[starts-with(%s, "%s")]', $lowerName, $lowerValue),
+            '*=' => sprintf('[contains(%s, "%s")]', $lowerName, $lowerValue),
+            '~=' => sprintf('[contains(concat(" ", normalize-space(%s), " "), " %s ")]', $lowerName, $lowerValue),
+            '|=' => sprintf('[%s="%s" or starts-with(%s, "%s-")]', $lowerName, $lowerValue, $lowerName, $lowerValue),
+            '=' => sprintf('[%s="%s"]', $lowerName, $lowerValue),
+            '!=' => sprintf('[%s and %s!="%s"]', $lowerName, $lowerName, $lowerValue),
+            default => sprintf('[%s]', $lowerName),
         };
     }
 
@@ -997,14 +1253,14 @@ class Query
             'first-child' => '[not(preceding-sibling::*)]',
             'last-child' => '[not(following-sibling::*)]',
             'only-child' => '[not(preceding-sibling::*) and not(following-sibling::*)]',
-            'nth-child' => static::compileNthChild($arg),
-            'nth-last-child' => static::compileNthChild($arg, true),
+            'nth-child' => static::compileNthChild($arg, false, false, '*', static::extractNthOf($arg)),
+            'nth-last-child' => static::compileNthChild($arg, true, false, '*', static::extractNthOf($arg)),
             // 结构伪类 - 同类型元素位置
             'first-of-type' => sprintf('[not(preceding-sibling::%s)]', $tagName),
             'last-of-type' => sprintf('[not(following-sibling::%s)]', $tagName),
             'only-of-type' => sprintf('[not(preceding-sibling::%s) and not(following-sibling::%s)]', $tagName, $tagName),
-            'nth-of-type' => static::compileNthChild($arg, false, true, $tagName),
-            'nth-last-of-type' => static::compileNthChild($arg, true, true, $tagName),
+            'nth-of-type' => static::compileNthChild($arg, false, true, $tagName, static::extractNthOf($arg)),
+            'nth-last-of-type' => static::compileNthChild($arg, true, true, $tagName, static::extractNthOf($arg)),
             // 内容伪类
             'empty' => '[not(*) and not(text()[normalize-space()])]',
             'contains' => sprintf('[contains(string(.), "%s")]', $arg),
@@ -1198,6 +1454,95 @@ class Query
     }
 
     /**
+     * 从 nth 公式参数中提取 "of S" 过滤选择器
+     *
+     * @param  string  $formula  如 "2n+1 of .item" 或 "even of li"
+     * @return string 过滤选择器（如 ".item"），无 of 子句时返回空字符串
+     */
+    protected static function extractNthOf(string $formula): string
+    {
+        if (preg_match('/\bof\s+(.+)$/i', $formula, $m)) {
+            return trim($m[1]);
+        }
+
+        return '';
+    }
+
+    /**
+     * 编译带 of 过滤的 nth-child / nth-of-type
+     *
+     * 语义：在匹配 $ofCond 的兄弟元素中排第 k 个，且元素自身也需匹配 $ofCond。
+     * 位置公式 An+B 作用于「匹配 ofCond 的兄弟序列」。
+     *
+     * @param  string  $formula  去除 of 子句后的公式
+     * @param  bool  $reverse  是否反向（nth-last-*）
+     * @param  bool  $ofType  是否按类型
+     * @param  string  $tagName  标签名（of-type 用）
+     * @param  string  $ofCond  of 过滤的 XPath 条件（已编译，不带方括号）
+     * @return string XPath 条件
+     */
+    protected static function compileNthChildWithFilter(string $formula, bool $reverse, bool $ofType, string $tagName, string $ofCond): string
+    {
+        // 剥离 "of S" 子句，仅保留纯 an+b 公式
+        $formula = preg_replace('/\s+of\s+.+$/i', '', $formula);
+        $formula = strtolower(trim($formula));
+
+        // 自身需匹配 of 条件
+        $selfCond = $ofCond !== '' ? sprintf('[%s]', $ofCond) : '';
+
+        // 兄弟轴（匹配 of 条件）
+        $sibAxis = $ofType ? $tagName : '*';
+        $sibFilter = $ofCond !== '' ? sprintf('[%s]', $ofCond) : '';
+        $prev = sprintf('preceding-sibling::%s%s', $sibAxis, $sibFilter);
+        $follow = sprintf('following-sibling::%s%s', $sibAxis, $sibFilter);
+
+        // 纯数字
+        if (is_numeric($formula)) {
+            $n = (int) $formula;
+            if ($reverse) {
+                return sprintf('[%s and count(%s) = %d]', $selfCond !== '' ? trim($selfCond, '[]') : 'true()', $follow, $n - 1);
+            }
+
+            return sprintf('[%s and count(%s) = %d]', $selfCond !== '' ? trim($selfCond, '[]') : 'true()', $prev, $n - 1);
+        }
+
+        if ($formula === 'even') {
+            $axis = $reverse ? $follow : $prev;
+            $mod = $reverse ? 'count(%s) + 1' : 'count(%s) + 1';
+
+            return sprintf('[%s and (%s) mod 2 = %d]', $selfCond !== '' ? trim($selfCond, '[]') : 'true()',
+                sprintf($mod, $axis), 0);
+        }
+
+        if ($formula === 'odd') {
+            $axis = $reverse ? $follow : $prev;
+
+            return sprintf('[%s and (count(%s) + 1) mod 2 = %d]', $selfCond !== '' ? trim($selfCond, '[]') : 'true()',
+                $axis, 1);
+        }
+
+        // 解析 an+b
+        if (preg_match('/^(?P<a>-?\d*)?n(?:(?P<b>[+-]\d+)?)?$/', $formula, $matches)) {
+            $a = $matches['a'] !== '' ? (int) $matches['a'] : 1;
+            $b = isset($matches['b']) ? (int) $matches['b'] : 0;
+            $axis = $reverse ? $follow : $prev;
+
+            // 位置 k = count(prev)+1 满足 a*(k-1)+b... 简化为 (count(prev)+1 - b) 能被 a 整除 且 >= 1
+            if ($a === 0) {
+                return sprintf('[%s and count(%s) + 1 = %d]', $selfCond !== '' ? trim($selfCond, '[]') : 'true()', $axis, $b);
+            }
+
+            $cmp = $reverse
+                ? sprintf('(count(%s) + 1) >= %d and (count(%s) + 1 - %d) mod %d = 0', $axis, max($b, 1), $axis, $b, abs($a))
+                : sprintf('(count(%s) + 1) >= %d and (count(%s) + 1 - %d) mod %d = 0', $axis, max($b, 1), $axis, $b, abs($a));
+
+            return sprintf('[%s and %s]', $selfCond !== '' ? trim($selfCond, '[]') : 'true()', $cmp);
+        }
+
+        return $selfCond;
+    }
+
+    /**
      * 编译 nth-child 伪类
      *
      * 支持多种公式格式：
@@ -1224,9 +1569,16 @@ class Query
      * // 倒数第2个
      * $xpath = Query::compileNthChild('2', true, false, 'li');
      */
-    protected static function compileNthChild(string $formula, bool $reverse = false, bool $ofType = false, string $tagName = '*'): string
+    protected static function compileNthChild(string $formula, bool $reverse = false, bool $ofType = false, string $tagName = '*', string $ofFilter = ''): string
     {
         $formula = strtolower(trim($formula));
+
+        // 提取 nth-child(An+B of S) 中的 of 过滤选择器，并编译为 XPath 条件
+        if ($ofFilter !== '') {
+            $ofSegments = static::parseSelector($ofFilter);
+            $ofCond = ! empty($ofSegments) ? static::compileSegmentConditions($ofSegments[0]) : '';
+            return static::compileNthChildWithFilter($formula, $reverse, $ofType, $tagName, $ofCond);
+        }
 
         if ($formula === 'even') {
             if ($ofType) {
@@ -1338,46 +1690,52 @@ class Query
      */
     protected static function compileNot(string $selector): string
     {
-        // 解析内部选择器
-        $segments = static::parseSelector($selector);
-        if (empty($segments)) {
+        $selector = trim($selector);
+        if ($selector === '') {
             return '';
         }
 
-        $conditions = [];
-        $segment = $segments[0];
+        // :not() 接受逗号分隔选择器列表（CSS 规范：不匹配列表中任意一个）
+        $selectors = array_map('trim', explode(',', $selector));
+        $orConditions = [];
 
-        // 如果是简单属性选择器如 [data-id="2"]
-        if (!empty($segment['attributes'])) {
-            foreach ($segment['attributes'] as $attr) {
-                $name = $attr['name'];
-                $operator = $attr['operator'] ?? null;
-                $value = $attr['value'] ?? null;
+        foreach ($selectors as $sel) {
+            if ($sel === '') {
+                continue;
+            }
+            $segments = static::parseSelector($sel);
+            if (empty($segments)) {
+                continue;
+            }
 
-                if ($operator === '=' && $value !== null) {
-                    // [@data-id!="2"]
-                    $conditions[] = sprintf('@%s!="%s"', $name, $value);
+            // 含组合器（后代空格 / > / + / ~）或复合选择器列表：作为后代否定处理
+            $hasCombinator = false;
+            if (count($segments) > 1) {
+                $hasCombinator = true;
+            } else {
+                $combinator = $segments[0]['combinator'] ?? '';
+                $hasCombinator = $combinator !== '' && $combinator !== ' ';
+            }
+
+            if ($hasCombinator) {
+                // 整体编译为 XPath（含组合器语义），再包成 descendant 否定
+                $innerXpath = static::cssToXpath($sel);
+                $innerXpath = preg_replace('/^\/\//', '', $innerXpath);
+                $orConditions[] = sprintf('descendant::%s', $innerXpath);
+            } else {
+                // 纯复合选择器：相对当前元素的段条件
+                $cond = static::compileSegmentConditions($segments[0]);
+                if ($cond !== '') {
+                    $orConditions[] = $cond;
                 }
             }
         }
 
-        // 如果有类名，反转类匹配
-        if (!empty($segment['classes'])) {
-            foreach ($segment['classes'] as $class) {
-                $conditions[] = sprintf('not(contains(concat(" ", normalize-space(@class), " "), " %s "))', $class);
-            }
-        }
-
-        // 如果有 ID，反转 ID 匹配
-        if (!empty($segment['id'])) {
-            $conditions[] = sprintf('@id!="%s"', $segment['id']);
-        }
-
-        if (empty($conditions)) {
+        if (empty($orConditions)) {
             return '';
         }
 
-        return '[' . implode(' and ', $conditions) . ']';
+        return sprintf('[not(%s)]', implode(' or ', $orConditions));
     }
 
     /**
@@ -1397,11 +1755,25 @@ class Query
      */
     protected static function compileHas(string $selector): string
     {
+        $selector = trim($selector);
+        $axis = 'descendant::';
+
+        // :has(> X) 仅匹配直接子代；:has(+ X) / :has(~ X) 匹配后续兄弟
+        $first = $selector !== '' ? $selector[0] : '';
+        if ($first === '>') {
+            $axis = 'child::';
+            $selector = ltrim(substr($selector, 1));
+        } elseif ($first === '+' || $first === '~') {
+            $axis = 'following-sibling::';
+            $selector = ltrim(substr($selector, 1));
+        }
+
+        // 把内部选择器编译为 XPath（绝对 //），再去掉开头的 // 转成 relative axis
         $innerXpath = static::cssToXpath($selector);
-        // 移除开头的 //
         $innerXpath = preg_replace('/^\/\//', '', $innerXpath);
-        // 检查后代元素中是否有匹配的
-        return sprintf('[%s]', $innerXpath);
+        // :has(X) 表示「包含后代/子代 X」，XPath 用对应轴表达
+        // 内部选择器可能含组合器（如 div p），需整体作为后代匹配，故包成条件
+        return sprintf('[%s%s]', $axis, $innerXpath);
     }
 
     /**

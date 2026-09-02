@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace zxf\Dom\Fragments;
 
+use zxf\Dom\Element;
 use zxf\Dom\Node;
 
 use DOMDocumentFragment as NativeDOMDocumentFragment;
@@ -123,7 +124,7 @@ class DocumentFragment extends Node
      * @param  Node|DOMNode|array  $nodes  要添加的节点
      * @return self
      */
-    public function append(Node|DOMNode|array $nodes): self
+    public function append(Node|DOMNode|string|array $nodes): self
     {
         if (! is_array($nodes)) {
             $nodes = [$nodes];
@@ -132,10 +133,24 @@ class DocumentFragment extends Node
         foreach ($nodes as $node) {
             if ($node instanceof Node) {
                 $node = $node->getNode();
+            } elseif (is_string($node)) {
+                $temp = (new Element($this->fragment->ownerDocument->createElement('div')))
+                    ->setInnerHtml($node)
+                    ->getNode();
+                // 先快照 childNodes（DOMNodeList 为 live 集合，遍历中 importNode 会让迭代器失效）
+                $children = [];
+                foreach ($temp->childNodes as $child) {
+                    $children[] = $child;
+                }
+                foreach ($children as $child) {
+                    $imported = $this->fragment->ownerDocument->importNode($child, true);
+                    $this->fragment->appendChild($imported);
+                }
+                continue;
             }
 
             if (! $node instanceof \DOMNode) {
-                throw new InvalidArgumentException('参数必须是 Node 或 DOMNode 的实例。');
+                throw new InvalidArgumentException('参数必须是 Node、DOMNode 实例或 HTML 字符串。');
             }
 
             $importedNode = $this->fragment->ownerDocument->importNode($node, true);
@@ -151,29 +166,43 @@ class DocumentFragment extends Node
      * @param  Node|DOMNode|array  $nodes  要添加的节点
      * @return self
      */
-    public function prepend(Node|DOMNode|array $nodes): self
+    public function prepend(Node|DOMNode|string|array $nodes): self
     {
         if (! is_array($nodes)) {
             $nodes = [$nodes];
         }
 
-        $nodes = array_reverse($nodes);
+        // 逐个处理：为保持最终顺序与传入顺序一致，从后往前插入到片段开头。
+        // 对每个节点先展开为「待插入的 DOMNode 列表」（字符串解析为全部顶层子节点）。
+        foreach (array_reverse($nodes) as $node) {
+            $domNodes = [];
 
-        foreach ($nodes as $node) {
             if ($node instanceof Node) {
-                $node = $node->getNode();
-            }
-
-            if (! $node instanceof \DOMNode) {
-                throw new InvalidArgumentException('参数必须是 Node 或 DOMNode 的实例。');
-            }
-
-            $importedNode = $this->fragment->ownerDocument->importNode($node, true);
-            
-            if ($this->fragment->firstChild === null) {
-                $this->fragment->appendChild($importedNode);
+                $domNodes[] = $node->getNode();
+            } elseif (is_string($node)) {
+                $temp = (new Element($this->fragment->ownerDocument->createElement('div')))
+                    ->setInnerHtml($node)
+                    ->getNode();
+                foreach ($temp->childNodes as $child) {
+                    $domNodes[] = $child;
+                }
+            } elseif ($node instanceof \DOMNode) {
+                $domNodes[] = $node;
             } else {
-                $this->fragment->insertBefore($importedNode, $this->fragment->firstChild);
+                throw new InvalidArgumentException('参数必须是 Node、DOMNode 实例或 HTML 字符串。');
+            }
+
+            // 同一节点的多个顶层子节点需保持原顺序：从后往前逐个插入到片段开头
+            foreach (array_reverse($domNodes) as $domNode) {
+                if (! $domNode instanceof \DOMNode) {
+                    continue;
+                }
+                $importedNode = $this->fragment->ownerDocument->importNode($domNode, true);
+                if ($this->fragment->firstChild === null) {
+                    $this->fragment->appendChild($importedNode);
+                } else {
+                    $this->fragment->insertBefore($importedNode, $this->fragment->firstChild);
+                }
             }
         }
 

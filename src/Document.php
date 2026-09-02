@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace zxf\Dom;
 
+use DOMCdataSection;
+use DOMComment;
 use DOMDocument;
 use DOMElement;
 use DOMNode;
+use DOMProcessingInstruction;
 use DOMText;
 use InvalidArgumentException;
 use RuntimeException;
@@ -46,6 +49,19 @@ class Document
      * XML 文档类型
      */
     public const TYPE_XML = 'xml';
+
+    /**
+     * HTML 加载标志
+     *
+     * - LIBXML_HTML_NODEFDTD：不自动生成 <!DOCTYPE> 声明
+     * - LIBXML_NONET：禁止解析外部实体/网络资源（避免 SSRF 与外链阻塞）
+     * - LIBXML_NOERROR|LIBXML_NOWARNING：错误由 libxml 错误缓冲统一收集
+     *
+     * 注意：刻意不启用 LIBXML_HTML_NOIMPLIED。该标志在解析多根文档/含 lang 等
+     * 属性时会静默丢失节点或属性（libxml 已知缺陷），且原库即采用默认包裹行为，
+     * 移除它对现有测试与行为无影响。
+     */
+    public const HTML_LOAD_OPTIONS = LIBXML_HTML_NODEFDTD | LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING;
 
     /**
      * DOM 文档对象
@@ -177,12 +193,12 @@ class Document
                 }
                 $loaded = $type === self::TYPE_XML
                     ? $this->document->loadXML($content)
-                    : $this->document->loadHTML($content);
+                    : $this->document->loadHTML($content, self::HTML_LOAD_OPTIONS);
             } elseif (file_exists($string)) {
                 // 本地文件
                 $loaded = $type === self::TYPE_XML
                     ? $this->document->load($string)
-                    : $this->document->loadHTMLFile($string);
+                    : $this->document->loadHTMLFile($string, self::HTML_LOAD_OPTIONS);
             } else {
                 throw new RuntimeException(sprintf('文件不存在: %s', $string));
             }
@@ -190,12 +206,13 @@ class Document
             if ($type === self::TYPE_XML) {
                 $loaded = $this->document->loadXML($string);
             } else {
-                // 对于 HTML，需要正确处理 UTF-8 编码
-                // 如果字符串是 UTF-8，需要在 XML 声明中指定编码
-                if (!preg_match('/encoding=/i', $string) && mb_detect_encoding($string, 'UTF-8', true) === 'UTF-8') {
+                // HTML5 解析：保留文档结构（不强制包裹 <html>/<body>），
+                // 关闭网络实体加载（避免 SSRF/外链阻塞）。
+                // 同时注入编码声明以保证 UTF-8 中文不被误解析为 Latin-1。
+                if (!preg_match('/encoding=/i', $string)) {
                     $string = '<?xml encoding="' . $this->encoding . '" ?>' . $string;
                 }
-                $loaded = $this->document->loadHTML($string);
+                $loaded = $this->document->loadHTML($string, self::HTML_LOAD_OPTIONS);
             }
         }
 
@@ -207,6 +224,15 @@ class Document
         }
 
         libxml_clear_errors();
+
+        // 加载后清理：移除仅用于编码提示的临时 XML 声明节点（HTML 文档不允许该声明）。
+        if ($type === self::TYPE_HTML) {
+            $node = $this->document->firstChild;
+            while ($node instanceof DOMProcessingInstruction && stripos((string) $node->nodeName, 'xml') !== false && preg_match('/encoding=/i', (string) $node->nodeValue)) {
+                $this->document->removeChild($node);
+                $node = $this->document->firstChild;
+            }
+        }
 
         return $this;
     }
@@ -242,6 +268,52 @@ class Document
         return $this->type === self::TYPE_XML
             ? $this->document->saveXML()
             : $this->document->saveHTML();
+    }
+
+    /**
+     * 将 HTML 片段转换为可 appendXML 的 XML 字符串
+     *
+     * 用于在文档上下文中以片段方式插入原始 HTML（setInnerHtml / append 字符串 / replaceWith 字符串）。
+     * 采用与文档一致的解析参数，保证 HTML5/void 元素语义正确；同时把常见 HTML 实体
+     * （&nbsp; 等）替换为合法 XML 实体，避免 appendXML 因未定义实体而失败。
+     *
+     * @param  string  $html  HTML 片段
+     * @param  self|null  $document  宿主文档（用于确定编码/类型）
+     * @return string
+     */
+    public static function fragmentToXml(string $html, ?self $document = null): string
+    {
+        $type = $document?->type ?? self::TYPE_HTML;
+
+        if ($type === self::TYPE_XML) {
+            return $html;
+        }
+
+        // 用临时 DOMDocument 以 HTML 语义解析片段（兼容 void 元素、实体、HTML5 标签），
+        // 再提取根容器内部内容，避免裸 appendXML 因 HTML 语法（如 <br> 无闭合）而失败。
+        $encoding = $document?->encoding ?? 'UTF-8';
+        $tmp = new DOMDocument($encoding);
+        $tmp->preserveWhiteSpace = false;
+        $fragmentHtml = '<?xml encoding="' . $encoding . '" ?>'
+            . '<div>' . $html . '</div>';
+        $ok = @$tmp->loadHTML($fragmentHtml, self::HTML_LOAD_OPTIONS);
+
+        if ($ok === false) {
+            // 解析失败（例如含有非法嵌套），退化为逐字符转义，保证插入安全且不丢内容
+            return htmlspecialchars($html, ENT_NOQUOTES | ENT_XML1);
+        }
+
+        $inner = '';
+        $root = $tmp->getElementsByTagName('div')->item(0);
+        if ($root !== null) {
+            foreach ($root->childNodes as $child) {
+                $inner .= $tmp->saveHTML($child);
+            }
+        } else {
+            $inner = $tmp->saveHTML();
+        }
+
+        return $inner;
     }
 
     /**
@@ -1481,19 +1553,46 @@ class Document
      *
      * @return \DOMXPath
      */
+    /**
+     * 缓存的 XPath 对象
+     *
+     * @var \DOMXPath|null
+     */
+    private ?\DOMXPath $xpath = null;
+
     protected function createXpath(): \DOMXPath
     {
-        return new \DOMXPath($this->document);
+        if ($this->xpath === null) {
+            $this->xpath = new \DOMXPath($this->document);
+            if ($this->type === self::TYPE_XML) {
+                $this->xpath->registerNamespace('php', 'http://php.net/xpath');
+                $this->xpath->registerPhpFunctions();
+            }
+        }
+
+        return $this->xpath;
     }
 
     /**
-     * 包装 DOM 节点为 Element 对象
+     * 包装 DOM 节点为对应的对象
+     *
+     * 文本节点包装为 Text，注释节点为 Comment，CDATA 为 Cdata，其余为 Element。
      *
      * @param  DOMNode  $node  DOM 节点
-     * @return Element
+     * @return Node
      */
-    public function wrapNode(DOMNode $node): Element
+    public function wrapNode(DOMNode $node): Node
     {
+        if ($node instanceof DOMText) {
+            return new Text($node);
+        }
+        if ($node instanceof DOMComment) {
+            return new Comment($node);
+        }
+        if ($node instanceof DOMCdataSection) {
+            return new Cdata($node);
+        }
+
         return new Element($node);
     }
 
@@ -1799,7 +1898,7 @@ class Document
     public function findByText(string $text, string $selector = '*'): array
     {
         $elements = $this->find($selector);
-        $result = [];
+        $matched = [];
 
         foreach ($elements as $element) {
             if (is_string($element) && str_contains($element, $text)) {
@@ -1807,11 +1906,45 @@ class Document
                 continue;
             }
             if ($element instanceof Element && str_contains($element->text(), $text)) {
-                $result[] = $element;
+                $matched[] = $element;
+            }
+        }
+
+        if ($matched === []) {
+            return [];
+        }
+
+        // 仅保留「最内层」匹配元素：剔除那些本身是其它匹配元素祖先的节点，
+        // 避免根 <html>/<body> 因包含目标文本而被整体返回。
+        $result = [];
+        foreach ($matched as $el) {
+            $elNode = $el->getNode();
+            $isAncestor = false;
+            foreach ($matched as $other) {
+                $otherNode = $other->getNode();
+                if ($other !== $el && $otherNode !== null && $elNode !== null && $elNode->contains($otherNode)) {
+                    $isAncestor = true;
+                    break;
+                }
+            }
+            if (! $isAncestor) {
+                $result[] = $el;
             }
         }
 
         return $result;
+    }
+
+    /**
+     * 按文本内容查找元素（getByText 是 findByText 的别名，提供更多可读性选择）
+     *
+     * @param  string  $text  要查找的文本
+     * @param  string  $selector  CSS选择器（可选，用于限制范围）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function getByText(string $text, string $selector = '*'): array
+    {
+        return $this->findByText($text, $selector);
     }
 
     /**
@@ -2273,6 +2406,11 @@ class Document
         $data = [];
         foreach ($selectors as $selectorConfig) {
             try {
+                // 兼容「字符串简写」：findWithFallback(['#a', '.b', 'div'])
+                if (is_string($selectorConfig)) {
+                    $selectorConfig = ['selector' => $selectorConfig];
+                }
+
                 // 获取选择器配置
                 $selector = $selectorConfig['selector'] ?? '';
                 $type = strtolower($selectorConfig['type'] ?? 'css');
@@ -2283,8 +2421,21 @@ class Document
                 $extractOptions = $selectorConfig['extractOptions'] ?? [];
 
                 if ($type === Query::TYPE_JSON) {
-                    // json 数组或者字符串
-                    $result = $this->handleJsonData($this->originalContent);
+                    // json 数组或者字符串：若指定了选择器，优先解析匹配元素内的 JSON 文本；
+                    // 否则回退到文档原始内容（与 find() 的 json 类型行为一致）
+                    if ($selector !== '') {
+                        $jsonElements = $this->find($selector, Query::TYPE_CSS, $contextNode);
+                        $jsonText = '';
+                        foreach ($jsonElements as $jsonEl) {
+                            $jsonText = $jsonEl instanceof Element ? trim($jsonEl->innerHtml()) : '';
+                            if ($jsonText !== '') {
+                                break;
+                            }
+                        }
+                        $result = $jsonText !== '' ? $this->handleJsonData($jsonText) : [];
+                    } else {
+                        $result = $this->handleJsonData($this->originalContent);
+                    }
                 } elseif ($type === Query::TYPE_TABLE) {
                     // 表格数据提取
                     if (empty($selector)) {
@@ -2312,12 +2463,16 @@ class Document
                 } elseif ($type === Query::TYPE_IMAGE) {
                     // 图片数据提取
                     $result = $this->extractImages($selector ?: 'img');
-                } elseif ($type === Query::TYPE_TEXT) {
-                    // 文本内容提取
-                    $elements = $this->find($selector, Query::TYPE_CSS, $contextNode);
+                } elseif ($type === 'text' || $type === Query::TYPE_TEXT) {
+                    // 文本内容提取（兼容字符串简写中的 ::text 选择器）
+                    $css = $selector;
+                    if (str_ends_with($css, '::text')) {
+                        $css = substr($css, 0, -strlen('::text'));
+                    }
+                    $elements = $this->find($css, Query::TYPE_CSS, $contextNode);
                     $result = [];
                     foreach ($elements as $el) {
-                        $text = $extractOptions['trimText'] ?? true ? trim($el->text()) : $el->text();
+                        $text = ($extractOptions['trimText'] ?? true) ? trim($el->text()) : $el->text();
                         if (!empty($text) || !($extractOptions['removeEmpty'] ?? true)) {
                             $result[] = $text;
                         }
@@ -2325,12 +2480,38 @@ class Document
                 } elseif ($type === Query::TYPE_REGEX) {
                     // 正则表达式选择器
                     $result = $this->handleRegexSelector($selector, $contextNode, $attribute, $extractMode, $group, $location);
+                } elseif ($type === Query::TYPE_TEXT_BY) {
+                    // 按文本内容回退查找（getByText 风格）
+                    $result = $this->findByText($selector, ($selectorConfig['scope'] ?? '*'));
+                } elseif ($type === Query::TYPE_VALUE) {
+                    // 表单元素值回退提取
+                    $elements = $this->find($selector ?: '*', Query::TYPE_CSS, $contextNode);
+                    $result = array_map(fn (Element $el) => $el->getValue(), $elements);
+                } elseif ($type === Query::TYPE_HTML) {
+                    // 内部 HTML 回退提取
+                    $elements = $this->find($selector ?: '*', Query::TYPE_CSS, $contextNode);
+                    $result = array_map(fn (Element $el) => $el->innerHtml(), $elements);
                 } else {
                     if (empty($selector)) {
                         continue;
                     }
-                    // CSS 或 XPath 选择器
-                    $result = $this->find($selector, $type, $contextNode);
+                    // CSS 或 XPath 选择器（自动识别 ::text / ::attr(name) 伪元素）
+                    if (str_ends_with($selector, '::text')) {
+                        $css = substr($selector, 0, -strlen('::text'));
+                        $elements = $this->find($css, $type, $contextNode);
+                        $result = array_map(fn (Element $el) => trim($el->text()), $elements);
+                    } elseif (preg_match('/::attr\(([^)]+)\)$/', $selector, $m)) {
+                        $css = substr($selector, 0, -strlen($m[0]));
+                        $attrName = trim($m[1], "'\"");
+                        $elements = $this->find($css, $type, $contextNode);
+                        $result = array_map(fn (Element $el) => $el->getAttribute($attrName), $elements);
+                    } elseif ($attribute !== null) {
+                        // 显式指定提取属性
+                        $elements = $this->find($selector, $type, $contextNode);
+                        $result = array_map(fn (Element $el) => $el->getAttribute($attribute), $elements);
+                    } else {
+                        $result = $this->find($selector, $type, $contextNode);
+                    }
                 }
 
                 // 如果找到结果，立即返回
@@ -2354,7 +2535,19 @@ class Document
     // 解析JSON字符串/JSON对象和数组数据，其他的返回false
     private function handleJsonData(mixed $data): array|false
     {
-        return !empty($res = parse_json($data)) ? $res : false;
+        if (is_array($data)) {
+            return $data;
+        }
+        if (! is_string($data)) {
+            return false;
+        }
+
+        $decoded = json_decode($data, true);
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
+            return false;
+        }
+
+        return $decoded;
     }
 
     /**
@@ -2587,9 +2780,13 @@ class Document
      * ]);
      */
     public function findFirstWithFallback(
-        array $selectors,
+        array|string $selectors,
         ?DOMElement $contextNode = null
     ): Element|string|array|null {
+        if (is_string($selectors)) {
+            $selectors = [$selectors];
+        }
+
         $results = $this->findWithFallback($selectors, $contextNode, true);
 
         if (empty($results)) {
