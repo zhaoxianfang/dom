@@ -84,11 +84,26 @@ class Document
     protected mixed $originalContent = '';
 
     /**
-     * 文档实例映射（用于从 DOMDocument 获取 Document）
+     * 文档实例映射（用于从 DOMDocument 反查 Document）
      *
-     * @var array<int, self>
+     * 采用 WeakMap<DOMDocument, WeakReference<Document>>：
+     * - 键为弱引用，DOMDocument 不再被持有时条目自动清除；
+     * - 值必须是 WeakReference，否则「值(Document) 强引用 键(DOMDocument)」会让
+     *   WeakMap 条目永远无法回收（典型的 WeakMap 循环陷阱）。
+     *
+     * 修复前使用 spl_object_hash 静态数组强持有每个 Document：常驻的队列 Worker
+     * 每采集一个页面就多留一整棵 DOM 树无法 GC，最终必然 OOM（低配服务器尤甚）。
+     *
+     * @var \WeakMap<DOMDocument, \WeakReference<self>>|null
      */
-    protected static array $instances = [];
+    protected static ?\WeakMap $instances = null;
+
+    /**
+     * 多选择器回退查找过程中收集的错误（不再写 error_log 污染生产日志）
+     *
+     * @var array<int, array{selector:string, type:string, message:string}>
+     */
+    protected array $fallbackErrors = [];
 
     /**
      * 构造函数
@@ -131,8 +146,9 @@ class Document
             }
         }
 
-        // 注册实例到静态映射
-        self::$instances[spl_object_hash($this->document)] = $this;
+        // 注册弱引用映射：不阻止 Document / DOMDocument 被 GC，避免常驻进程内存泄漏
+        self::$instances ??= new \WeakMap();
+        self::$instances[$this->document] = \WeakReference::create($this);
     }
 
     /**
@@ -161,8 +177,38 @@ class Document
      */
     public static function getFromDomDocument(DOMDocument $domDocument): ?self
     {
-        $hash = spl_object_hash($domDocument);
-        return self::$instances[$hash] ?? null;
+        if (self::$instances === null) {
+            return null;
+        }
+
+        $reference = self::$instances[$domDocument] ?? null;
+
+        return $reference instanceof \WeakReference ? $reference->get() : null;
+    }
+
+    /**
+     * 显式设置文档原始内容（供「先拿到 HTML 字符串再交给解析器」的场景使用）
+     *
+     * 典型场景：无头浏览器渲染完成后把 document.documentElement.outerHTML
+     * 交给本库解析，此时若页面数据本身是 JSON（或内嵌 JSON 块），json 类型
+     * 选择器需要以原始文本为数据源，而非已被 loadHTML 包装过的 DOM。
+     *
+     * @param  mixed  $content  原始内容（字符串 / 数组 / 对象）
+     * @return self
+     */
+    public function setOriginalContent(mixed $content): self
+    {
+        $this->originalContent = $content;
+
+        return $this;
+    }
+
+    /**
+     * 获取文档原始内容（未经 DOM 包装）
+     */
+    public function getOriginalContent(): mixed
+    {
+        return $this->originalContent;
     }
 
     /**
@@ -179,62 +225,87 @@ class Document
     {
         $type = strtolower($type ?? $this->type);
 
-        // 禁用错误输出，使用异常处理
-        libxml_use_internal_errors(true);
+        // 保存 libxml 原状态：本方法临时接管错误处理，结束后必须恢复，
+        // 否则调用方后续的 libxml 行为会被静默改变（全局状态污染）。
+        $previousInternalErrors = libxml_use_internal_errors(true);
+        $content = $string;
 
-        $loaded = false;
-
-        if ($isFile) {
-            // 检查是否为 HTTP/HTTPS URL
-            if ($this->isRemoteUrl($string)) {
-                $content = $this->fetchRemoteContent($string);
-                if ($content === false) {
-                    throw new RuntimeException(sprintf('无法获取远程内容: %s', $string));
+        try {
+            if ($isFile) {
+                if ($this->isRemoteUrl($string)) {
+                    $content = $this->fetchRemoteContent($string);
+                    if ($content === false) {
+                        throw new RuntimeException(sprintf('无法获取远程内容: %s', $string));
+                    }
+                } elseif (file_exists($string)) {
+                    $content = @file_get_contents($string);
+                    if ($content === false) {
+                        throw new RuntimeException(sprintf('文件读取失败: %s', $string));
+                    }
+                } else {
+                    throw new RuntimeException(sprintf('文件不存在: %s', $string));
                 }
-                $loaded = $type === self::TYPE_XML
-                    ? $this->document->loadXML($content)
-                    : $this->document->loadHTML($content, self::HTML_LOAD_OPTIONS);
-            } elseif (file_exists($string)) {
-                // 本地文件
-                $loaded = $type === self::TYPE_XML
-                    ? $this->document->load($string)
-                    : $this->document->loadHTMLFile($string, self::HTML_LOAD_OPTIONS);
-            } else {
-                throw new RuntimeException(sprintf('文件不存在: %s', $string));
             }
-        } else {
+
+            /*
+             | 统一记录原始内容：json 类型选择器以它为数据源。
+             | 修复前仅「远程 URL」分支写入，导致传入 HTML / JSON 字符串时
+             | json 规则恒返回空数组——「无头浏览器渲染完再交给本库解析」
+             | 走的正是字符串路径，属于必现缺陷。
+             */
+            $this->originalContent = $content;
+            $this->fallbackErrors = [];
+
             if ($type === self::TYPE_XML) {
-                $loaded = $this->document->loadXML($string);
+                $loaded = $this->document->loadXML($content);
             } else {
-                // HTML5 解析：保留文档结构（不强制包裹 <html>/<body>），
-                // 关闭网络实体加载（避免 SSRF/外链阻塞）。
-                // 同时注入编码声明以保证 UTF-8 中文不被误解析为 Latin-1。
-                if (!preg_match('/encoding=/i', $string)) {
-                    $string = '<?xml encoding="' . $this->encoding . '" ?>' . $string;
+                /*
+                 | HTML5 解析：保留文档结构、关闭网络实体加载（避免 SSRF / 外链阻塞）。
+                 | 未声明编码时注入 XML 编码提示，保证 UTF-8 中文不被误判为 Latin-1。
+                 |
+                 | 缺陷修复：原实现用 preg_match('/encoding=/i', $string) 在【整篇文档】
+                 | 中查找，页面正文或内联脚本只要出现 "encoding=" 就跳过注入，中文随即
+                 | 乱码（SPA 打包脚本里该字样极为常见）。改为只检测文档头部 1024 字节
+                 | 内的合法编码声明：XML PI / <meta charset> / http-equiv Content-Type。
+                 */
+                $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+                $head = substr($content, 0, 1024);
+                $hasEncodingHint = preg_match('/<\?xml[^>]*encoding\s*=/i', $head) === 1
+                    || preg_match('/<meta[^>]+charset\s*=/i', $head) === 1
+                    || preg_match('/<meta[^>]+http-equiv\s*=\s*["\']?content-type[^>]*charset\s*=/i', $head) === 1;
+
+                if (! $hasEncodingHint) {
+                    $content = '<?xml encoding="'.$this->encoding.'" ?>'.$content;
                 }
-                $loaded = $this->document->loadHTML($string, self::HTML_LOAD_OPTIONS);
+
+                $loaded = $this->document->loadHTML($content, self::HTML_LOAD_OPTIONS);
             }
-        }
 
-        if (! $loaded) {
-            $errors = libxml_get_errors();
-            libxml_clear_errors();
-            $errorMsg = !empty($errors) ? $errors[0]->message : '未知错误';
-            throw new RuntimeException(sprintf('文档加载失败: %s', $errorMsg));
-        }
+            if (! $loaded) {
+                $errors = libxml_get_errors();
+                $errorMsg = ! empty($errors) ? $errors[0]->message : '未知错误';
+                throw new RuntimeException(sprintf('文档加载失败: %s', $errorMsg));
+            }
 
-        libxml_clear_errors();
-
-        // 加载后清理：移除仅用于编码提示的临时 XML 声明节点（HTML 文档不允许该声明）。
-        if ($type === self::TYPE_HTML) {
-            $node = $this->document->firstChild;
-            while ($node instanceof DOMProcessingInstruction && stripos((string) $node->nodeName, 'xml') !== false && preg_match('/encoding=/i', (string) $node->nodeValue)) {
-                $this->document->removeChild($node);
+            // 加载后清理：移除仅用于编码提示的 XML 声明节点（HTML 文档不允许该声明）。
+            if ($type === self::TYPE_HTML) {
                 $node = $this->document->firstChild;
+                while ($node instanceof DOMProcessingInstruction
+                    && stripos((string) $node->nodeName, 'xml') !== false
+                    && preg_match('/encoding\s*=/i', (string) $node->nodeValue) === 1) {
+                    $this->document->removeChild($node);
+                    $node = $this->document->firstChild;
+                }
             }
-        }
 
-        return $this;
+            // 文档内容已替换，清掉缓存的 XPath 对象以便下次查询基于新 DOM 重建
+            $this->xpath = null;
+
+            return $this;
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousInternalErrors);
+        }
     }
 
     /**
@@ -400,15 +471,17 @@ class Document
      * @param  string|null  $value  属性值
      * @return self
      */
-    public function setAttr(string $expression, string $name, ?string $value = null): self
+    public function setAttr(string $expression, string $name, ?string $value = null, string $type = Query::TYPE_CSS): self
     {
         if ($value === null) {
             return $this;
         }
 
-        $element = $this->first($expression);
+        // 修复：set() 早已把 $type 传进来，但本方法此前未声明该参数，
+        // 导致「按 XPath / 正则设置属性」被静默降级为 CSS 查找。
+        $element = $this->first($expression, $type);
 
-        if ($element !== null) {
+        if ($element instanceof Element) {
             $element->setAttribute($name, $value);
         }
 
@@ -1427,9 +1500,10 @@ class Document
      *
      * @return array|false JSON 数据
      */
-    public function json(mixed $content = null):array|false
+    public function json(mixed $content = null): array|false
     {
-        return $this->handleJsonData($content);
+        // 未显式传内容时回退到文档原始内容（此前恒传 null → 恒返回 false）
+        return $this->handleJsonData($content ?? $this->originalContent);
     }
 
     /**
@@ -2523,8 +2597,18 @@ class Document
                     }
                 }
             } catch (\Throwable $e) {
-                // 记录错误但继续尝试下一个选择器
-                error_log("findWithFallback error: " . $e->getMessage());
+                /*
+                 | 记录错误但继续尝试下一个选择器。
+                 | 修复：此前直接 error_log()，在常驻 Worker / 批量采集时会把选择器
+                 | 异常刷进全局错误日志，且调用方无从得知「哪条规则失败了」。
+                 | 改为收集到实例，由 getFallbackErrors() 交给上层记录或展示。
+                 */
+                $config = $selectorConfig ?? null;
+                $this->fallbackErrors[] = [
+                    'selector' => is_array($config) ? (string) ($config['selector'] ?? '') : (is_string($config) ? $config : ''),
+                    'type' => is_array($config) ? (string) ($config['type'] ?? 'css') : 'css',
+                    'message' => $e->getMessage(),
+                ];
                 continue;
             }
         }
@@ -2532,22 +2616,59 @@ class Document
         return $data;
     }
 
-    // 解析JSON字符串/JSON对象和数组数据，其他的返回false
+    /**
+     * 获取多选择器回退查找过程中被吞掉的异常（便于日志 / 规则测试页排障）
+     *
+     * @return array<int, array{selector:string, type:string, message:string}>
+     */
+    public function getFallbackErrors(): array
+    {
+        return $this->fallbackErrors;
+    }
+
+    /** 清空已收集的选择器异常 */
+    public function clearFallbackErrors(): self
+    {
+        $this->fallbackErrors = [];
+
+        return $this;
+    }
+
+    /**
+     * 解析 JSON 字符串 / 对象 / 数组，其它输入返回 false
+     *
+     * 修复点：
+     * - 支持对象输入（此前直接返回 false）；
+     * - 去除 UTF-8 BOM 与首尾空白（接口返回带 BOM 的 JSON 此前解析失败）；
+     * - 顶层为合法标量时包装为 ['value' => ...]，不再误判为解析失败。
+     */
     private function handleJsonData(mixed $data): array|false
     {
         if (is_array($data)) {
             return $data;
         }
+
+        if (is_object($data)) {
+            $decoded = json_decode((string) json_encode($data), true);
+
+            return is_array($decoded) ? $decoded : false;
+        }
+
         if (! is_string($data)) {
             return false;
         }
 
-        $decoded = json_decode($data, true);
-        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', trim($data));
+        if ($content === null || $content === '') {
             return false;
         }
 
-        return $decoded;
+        $decoded = json_decode($content, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return false;
+        }
+
+        return is_array($decoded) ? $decoded : ['value' => $decoded];
     }
 
     /**
@@ -4982,11 +5103,13 @@ class Document
      * - 自动编码检测
      * - 超时控制（连接超时 10 秒，总超时 30 秒）
      * - 模拟浏览器 User-Agent
+     * - 协议白名单：仅允许 HTTP/HTTPS，重定向亦受同一限制
      *
      * @param  string  $url  远程 URL
      * @return string|false 返回内容或 false
      *
      * @throws RuntimeException 当 cURL 扩展未启用时抛出
+     * @throws RuntimeException 当 URL 协议非法或 cURL 选项设置失败时抛出
      * @throws RuntimeException 当请求失败时抛出
      * @throws RuntimeException 当 HTTP 状态码异常时抛出
      *
@@ -5000,13 +5123,19 @@ class Document
             throw new RuntimeException('cURL 扩展未启用，无法获取远程内容');
         }
 
+        // 协议白名单：即便调用方绕过 isRemoteUrl() 直接调用本方法，
+        // 也不允许 file:// / gopher:// / dict:// 等协议读取本地文件或探测内网端口
+        if (preg_match('/^https?:\/\//i', $url) !== 1) {
+            throw new RuntimeException('远程内容仅支持 http / https 协议');
+        }
+
         $ch = curl_init();
         if ($ch === false) {
             return false;
         }
 
         // 配置 cURL 选项
-        curl_setopt_array($ch, [
+        $curlOptions = [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
@@ -5022,7 +5151,28 @@ class Document
                 'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
                 'Cache-Control: no-cache',
             ],
-        ]);
+        ];
+
+        /*
+         | 限制「初始请求」与「跟随重定向」可用的协议集合。
+         | 默认 libcurl 在部分版本允许重定向下沉到 FILE / GOPHER / DICT 等协议，
+         | 目标站点只要返回一个 302 就可能让服务器读取本地文件或打内网端口。
+         | 常量用 defined() 守卫，兼容未暴露这些常量的 PHP / libcurl 组合。
+         */
+        if (defined('CURLPROTO_HTTP') && defined('CURLPROTO_HTTPS')) {
+            $allowedProtocols = CURLPROTO_HTTP | CURLPROTO_HTTPS;
+            if (defined('CURLOPT_PROTOCOLS')) {
+                $curlOptions[CURLOPT_PROTOCOLS] = $allowedProtocols;
+            }
+            if (defined('CURLOPT_REDIR_PROTOCOLS')) {
+                $curlOptions[CURLOPT_REDIR_PROTOCOLS] = $allowedProtocols;
+            }
+        }
+
+        if (curl_setopt_array($ch, $curlOptions) !== true) {
+            curl_close($ch);
+            throw new RuntimeException('cURL 选项设置失败，已取消远程请求');
+        }
 
         $content = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -5030,8 +5180,8 @@ class Document
 
         curl_close($ch);
 
-        // 检查错误
-        if ($content === false || !empty($error)) {
+        // 检查错误（RETURNTRANSFER 失效时 curl_exec 可能返回 true，不能当作字符串内容）
+        if (!is_string($content) || !empty($error)) {
             throw new RuntimeException(sprintf('cURL 请求失败: %s', $error ?: '未知错误'));
         }
 
@@ -5039,9 +5189,7 @@ class Document
         if ($httpCode < 200 || $httpCode >= 300) {
             throw new RuntimeException(sprintf('HTTP 请求失败，状态码: %d', $httpCode));
         }
-        // 记录原始返回内容
-        $this->originalContent = $content;
-
+        // 原始内容由 load() 统一记录（避免远程 / 字符串两条路径行为不一致）
         return $content;
     }
 
