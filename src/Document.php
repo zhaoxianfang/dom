@@ -232,6 +232,19 @@ class Document
 
         try {
             if ($isFile) {
+                /*
+                 | 安全：拒绝除 http(s) 之外的任何 URL / stream wrapper 形式。
+                 | PHP 的 file_exists() / file_get_contents() 支持 file://、php://、
+                 | phar:// 等 wrapper，若把用户可控的「URL」当成普通本地路径处理，
+                 | 会直接读取服务器本地文件（例如 file:///etc/passwd）。
+                 | Windows 绝对路径 C:\\dir\\file.html 不含 URL scheme，不受影响。
+                 */
+                $hasUrlScheme = preg_match('#^[a-z][a-z0-9+.-]*:#i', $string) === 1;
+                $isWindowsPath = preg_match('#^[a-z]:[\\\\/]#i', $string) === 1;
+                if ($hasUrlScheme && ! $isWindowsPath && ! $this->isRemoteUrl($string)) {
+                    throw new RuntimeException(sprintf('不支持的 URL 协议（仅允许 http/https）：%s', $string));
+                }
+
                 if ($this->isRemoteUrl($string)) {
                     $content = $this->fetchRemoteContent($string);
                     if ($content === false) {
