@@ -177,13 +177,24 @@ class Document
      */
     public static function getFromDomDocument(DOMDocument $domDocument): ?self
     {
-        if (self::$instances === null) {
-            return null;
-        }
+        self::$instances ??= new \WeakMap();
 
         $reference = self::$instances[$domDocument] ?? null;
+        $document = $reference instanceof \WeakReference ? $reference->get() : null;
 
-        return $reference instanceof \WeakReference ? $reference->get() : null;
+        if ($document instanceof self) {
+            return $document;
+        }
+
+        /*
+         | WeakMap 的值必须是弱引用（否则「值强引用键」会让条目永不回收）。
+         | 因此链式调用 Document::create(...)->find('a') 后只保留 Element 时，
+         | wrapper 会被 GC，而 Element 仍强持有 DOMNode → DOMDocument。
+         | 此时返回 null 会让 Node/Element::ownerDocument(): Document 抛 TypeError，
+         | createFragment() 也会因空指针崩溃。这里按需重建一个轻量 wrapper
+         | 并重新登记（构造函数会写入 WeakMap），保证下游始终拿到有效对象。
+         */
+        return new self($domDocument);
     }
 
     /**
@@ -270,25 +281,33 @@ class Document
             $this->fallbackErrors = [];
 
             if ($type === self::TYPE_XML) {
-                $loaded = $this->document->loadXML($content);
+                // 与 HTML 分支保持同等防御：禁止解析期间加载网络实体 / DTD
+                $loaded = $this->document->loadXML(
+                    $content,
+                    LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING
+                );
             } else {
                 /*
-                 | HTML5 解析：保留文档结构、关闭网络实体加载（避免 SSRF / 外链阻塞）。
-                 | 未声明编码时注入 XML 编码提示，保证 UTF-8 中文不被误判为 Latin-1。
-                 |
-                 | 缺陷修复：原实现用 preg_match('/encoding=/i', $string) 在【整篇文档】
-                 | 中查找，页面正文或内联脚本只要出现 "encoding=" 就跳过注入，中文随即
-                 | 乱码（SPA 打包脚本里该字样极为常见）。改为只检测文档头部 1024 字节
-                 | 内的合法编码声明：XML PI / <meta charset> / http-equiv Content-Type。
-                 */
+             | HTML 解析：关闭网络实体加载（避免 SSRF / 外链阻塞），并在文档确实
+             | 没有编码声明时注入一条【带唯一标记】的 XML 编码提示，防止 UTF-8 中文
+             | 被 libxml 误判为 Latin-1。
+             |
+             | 三处历史缺陷一次修复：
+             | 1) 全文 preg_match('/encoding=/i') 会被正文 / 内联脚本里的
+             |    "encoding=1" 误命中 → 中文乱码；
+             | 2) 只扫前 1024 字节会漏掉被大量 inline script / preload 挤到后面的
+             |    <meta charset>（Chromium outerHTML 的常见形态），同样导致乱码；
+             | 3) 注入的 PI 在存在 <!DOCTYPE> 时不是 firstChild，旧清理循环
+             |    从 firstChild 起一次都不执行 → <?xml encoding... ?> 泄漏进
+             |    toString()/html()；且旧循环会误删用户自带的 XHTML 声明。
+             */
                 $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
-                $head = substr($content, 0, 1024);
-                $hasEncodingHint = preg_match('/<\?xml[^>]*encoding\s*=/i', $head) === 1
-                    || preg_match('/<meta[^>]+charset\s*=/i', $head) === 1
-                    || preg_match('/<meta[^>]+http-equiv\s*=\s*["\']?content-type[^>]*charset\s*=/i', $head) === 1;
+                $head = $this->extractHeadForEncoding($content);
+                $injectedEncodingHint = false;
 
-                if (! $hasEncodingHint) {
-                    $content = '<?xml encoding="'.$this->encoding.'" ?>'.$content;
+                if (! $this->hasEncodingDeclaration($head)) {
+                    $content = '<?xml encoding="'.$this->encoding.'" data-zxf-dom="1" ?>'.$content;
+                    $injectedEncodingHint = true;
                 }
 
                 $loaded = $this->document->loadHTML($content, self::HTML_LOAD_OPTIONS);
@@ -300,14 +319,22 @@ class Document
                 throw new RuntimeException(sprintf('文档加载失败: %s', $errorMsg));
             }
 
-            // 加载后清理：移除仅用于编码提示的 XML 声明节点（HTML 文档不允许该声明）。
-            if ($type === self::TYPE_HTML) {
-                $node = $this->document->firstChild;
-                while ($node instanceof DOMProcessingInstruction
-                    && stripos((string) $node->nodeName, 'xml') !== false
-                    && preg_match('/encoding\s*=/i', (string) $node->nodeValue) === 1) {
-                    $this->document->removeChild($node);
-                    $node = $this->document->firstChild;
+            /*
+             | 只清理本库注入的 PI：遍历全部子节点（DOCTYPE 可能是 firstChild），
+             | 且必须带 data-zxf-dom="1" 标记，避免误删用户自带的 XML 声明。
+             */
+            if ($type === self::TYPE_HTML && $injectedEncodingHint) {
+                $injectedNodes = [];
+                foreach ($this->document->childNodes as $childNode) {
+                    if ($childNode instanceof DOMProcessingInstruction
+                        && strcasecmp((string) $childNode->nodeName, 'xml') === 0
+                        && str_contains((string) $childNode->nodeValue, 'data-zxf-dom="1"')) {
+                        $injectedNodes[] = $childNode;
+                    }
+                }
+
+                foreach ($injectedNodes as $injectedNode) {
+                    $this->document->removeChild($injectedNode);
                 }
             }
 
@@ -319,6 +346,65 @@ class Document
             libxml_clear_errors();
             libxml_use_internal_errors($previousInternalErrors);
         }
+    }
+
+    /**
+     * 截取用于「编码声明检测」的文档头部
+     *
+     * 只取 <head> 结束之前的内容（上限 64KB）；没有 </head> 时退化为前 8192 字节。
+     * 这样既能覆盖被大量 inline script / preload 挤到后面的 <meta charset>，
+     * 又不会像旧实现那样在【整篇正文】里搜索 "encoding=" 造成误判。
+     * 同时剔除 script / style 块，避免 JS 字符串中的 "<meta charset=" 字面量
+     * 被当作真实编码声明。
+     *
+     * @param  string  $content  完整 HTML 字符串
+     * @return string 用于检测的头部片段
+     */
+    protected function extractHeadForEncoding(string $content): string
+    {
+        $headEnd = stripos($content, '</head>');
+        $length = $headEnd !== false
+            ? min($headEnd + 7, 65536)
+            : min(strlen($content), 8192);
+
+        $head = substr($content, 0, $length);
+        $head = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $head) ?? $head;
+        $head = preg_replace('/<style\b[^>]*>.*?<\/style>/is', '', $head) ?? $head;
+
+        return $head;
+    }
+
+    /**
+     * 判断头部是否包含合法编码声明（XML PI / <meta charset> / http-equiv）
+     *
+     * 只在真实的 <meta> 标签内匹配，且 charset 的值需形如编码名（2~32 位），
+     * 避免把 `<meta name="x" content="charset=1">` 之类的普通属性误判成声明。
+     *
+     * @param  string  $head  文档头部片段
+     */
+    protected function hasEncodingDeclaration(string $head): bool
+    {
+        if (preg_match('/<\?xml[^>]*\bencoding\s*=/i', $head) === 1) {
+            return true;
+        }
+
+        $matched = preg_match_all('/<meta\b[^>]*>/i', $head, $metaTags);
+        if ($matched === false || $matched === 0 || empty($metaTags[0])) {
+            return false;
+        }
+
+        foreach ($metaTags[0] as $metaTag) {
+            if (preg_match('/\bcharset\s*=\s*["\']?[A-Za-z0-9_-]{2,32}/i', $metaTag) === 1) {
+                return true;
+            }
+
+            if (preg_match('/\bhttp-equiv\s*=\s*["\']?content-type/i', $metaTag) === 1
+                && preg_match('/\bcharset\s*=/i', $metaTag) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -531,7 +617,9 @@ class Document
     public function attr(string $expression, string $name, ?string $value = null, string $type = Query::TYPE_CSS)
     {
         if ($value !== null) {
-            return $this->setAttr($expression, $name, $value);
+            // 第 4 参数 type 必须透传：否则按 XPath / 正则设置属性会被静默
+            // 降级为 CSS 查找，出现「设置没生效但不报错」的假象。
+            return $this->setAttr($expression, $name, $value, $type);
         }
 
         $element = $this->first($expression, $type);
@@ -1651,10 +1739,12 @@ class Document
     {
         if ($this->xpath === null) {
             $this->xpath = new \DOMXPath($this->document);
-            if ($this->type === self::TYPE_XML) {
-                $this->xpath->registerNamespace('php', 'http://php.net/xpath');
-                $this->xpath->registerPhpFunctions();
-            }
+            /*
+             | 安全：此前在 XML 文档上无条件 registerPhpFunctions()，使 XPath
+             | 表达式中的 php:function("system", ...) 能执行任意 PHP 函数。
+             | 选择器可能来自后台规则配置，等价于远程代码执行面。本库不提供
+             | PHP 函数 XPath 扩展，故彻底移除注册（库中亦无任何调用点）。
+             */
         }
 
         return $this->xpath;
@@ -2492,6 +2582,17 @@ class Document
     ): array {
         $data = [];
         foreach ($selectors as $selectorConfig) {
+            // 非法配置（null / int / object）不应被后面的 catch 吞成「无结果」，
+            // 显式记录为一条可定位的错误后跳过，避免排障信息丢失。
+            if (! is_array($selectorConfig) && ! is_string($selectorConfig)) {
+                $this->fallbackErrors[] = [
+                    'selector' => '',
+                    'type' => 'unknown',
+                    'message' => '选择器配置必须是数组或字符串，已跳过该项',
+                ];
+                continue;
+            }
+
             try {
                 // 兼容「字符串简写」：findWithFallback(['#a', '.b', 'div'])
                 if (is_string($selectorConfig)) {
@@ -5147,6 +5248,15 @@ class Document
             return false;
         }
 
+        /*
+         | 响应体积上限：RETURNTRANSFER 会把整篇响应一次性读入内存，超大 / 慢速
+         | 响应可直接撑爆常驻 Worker。改用 WRITEFUNCTION 逐块累计，超过上限立即
+         | 返回 0 通知 libcurl 中止，避免 OOM。子类可覆盖 maxRemoteContentBytes()。
+         */
+        $responseBody = '';
+        $receivedBytes = 0;
+        $maxBytes = $this->maxRemoteContentBytes();
+
         // 配置 cURL 选项
         $curlOptions = [
             CURLOPT_URL => $url,
@@ -5164,15 +5274,28 @@ class Document
                 'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
                 'Cache-Control: no-cache',
             ],
+            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$responseBody, &$receivedBytes, $maxBytes): int {
+                $receivedBytes += strlen($chunk);
+                if ($receivedBytes > $maxBytes) {
+                    return 0;
+                }
+                $responseBody .= $chunk;
+
+                return strlen($chunk);
+            },
         ];
 
         /*
          | 限制「初始请求」与「跟随重定向」可用的协议集合。
          | 默认 libcurl 在部分版本允许重定向下沉到 FILE / GOPHER / DICT 等协议，
          | 目标站点只要返回一个 302 就可能让服务器读取本地文件或打内网端口。
-         | 常量用 defined() 守卫，兼容未暴露这些常量的 PHP / libcurl 组合。
+         | libcurl 7.85+ 推荐 *_STR 形式（旧 CURLOPT_PROTOCOLS 已弃用），
+         | 未暴露该常量时回退到位掩码形式，常量一律用 defined() 守卫。
          */
-        if (defined('CURLPROTO_HTTP') && defined('CURLPROTO_HTTPS')) {
+        if (defined('CURLOPT_PROTOCOLS_STR') && defined('CURLOPT_REDIR_PROTOCOLS_STR')) {
+            $curlOptions[CURLOPT_PROTOCOLS_STR] = 'http,https';
+            $curlOptions[CURLOPT_REDIR_PROTOCOLS_STR] = 'http,https';
+        } elseif (defined('CURLPROTO_HTTP') && defined('CURLPROTO_HTTPS')) {
             $allowedProtocols = CURLPROTO_HTTP | CURLPROTO_HTTPS;
             if (defined('CURLOPT_PROTOCOLS')) {
                 $curlOptions[CURLOPT_PROTOCOLS] = $allowedProtocols;
@@ -5183,18 +5306,28 @@ class Document
         }
 
         if (curl_setopt_array($ch, $curlOptions) !== true) {
-            curl_close($ch);
             throw new RuntimeException('cURL 选项设置失败，已取消远程请求');
         }
 
-        $content = curl_exec($ch);
+        // 设置了 WRITEFUNCTION 后 curl_exec 返回 bool，响应正文由 $responseBody 累计
+        $executed = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
 
-        curl_close($ch);
+        // PHP 8.0 起 CurlHandle 由 GC 自动释放；curl_close() 在 PHP 8.5 已弃用，
+        // 调用只会产生 E_DEPRECATED 日志噪声，这里不再显式关闭。
 
-        // 检查错误（RETURNTRANSFER 失效时 curl_exec 可能返回 true，不能当作字符串内容）
-        if (!is_string($content) || !empty($error)) {
+        // 体积超限优先判定：WRITEFUNCTION 中止时 curl_error 会是 "Failed writing body"，
+        // 直接按传输错误处理会掩盖真正的「响应过大」原因。
+        if ($receivedBytes > $maxBytes) {
+            throw new RuntimeException(sprintf(
+                '远程内容超过 %d 字节上限（已接收 %d 字节），已中止请求以防内存溢出',
+                $maxBytes,
+                $receivedBytes
+            ));
+        }
+
+        if ($executed === false || !empty($error)) {
             throw new RuntimeException(sprintf('cURL 请求失败: %s', $error ?: '未知错误'));
         }
 
@@ -5203,7 +5336,17 @@ class Document
             throw new RuntimeException(sprintf('HTTP 请求失败，状态码: %d', $httpCode));
         }
         // 原始内容由 load() 统一记录（避免远程 / 字符串两条路径行为不一致）
-        return $content;
+        return $responseBody;
+    }
+
+    /**
+     * 单次远程请求允许接收的最大字节数（默认 16MB）
+     *
+     * 子类可覆盖以适配特殊站点；设置过大前请评估常驻 Worker 的内存上限。
+     */
+    protected function maxRemoteContentBytes(): int
+    {
+        return 16 * 1024 * 1024;
     }
 
     /**

@@ -187,6 +187,14 @@ class Query
     protected static array $compiled = [];
 
     /**
+     * 编译缓存上限（超出后淘汰较早的一半）
+     *
+     * 选择器可能来自后台规则且带动态值（如 #item-{$id}），常驻 queue:work
+     * 进程若无限累积静态缓存，内存会缓慢增长直至 OOM。
+     */
+    protected const COMPILED_CACHE_LIMIT = 1024;
+
+    /**
      * 选择器类型检测结果缓存
      *
      * @var array<string, string>
@@ -284,6 +292,8 @@ class Query
      */
     public static function compile(string $expression, string $type = self::TYPE_CSS): string
     {
+        self::trimCompiledCache();
+
         $type = strtolower($type);
 
         $supportedTypes = [self::TYPE_CSS, self::TYPE_XPATH, self::TYPE_REGEX, self::TYPE_TABLE, self::TYPE_LIST, self::TYPE_FORM, self::TYPE_LINK, self::TYPE_IMAGE, self::TYPE_TEXT, self::TYPE_JSON];
@@ -405,6 +415,24 @@ class Query
     }
 
     /**
+     * 限制静态缓存体积：达到上限时淘汰较早的一半，避免常驻 Worker 内存泄漏
+     *
+     * 保留字符串键（array_slice 第三参数为 true），不破坏已有 md5 索引。
+     */
+    protected static function trimCompiledCache(): void
+    {
+        $keepFrom = (int) (self::COMPILED_CACHE_LIMIT / 2);
+
+        if (count(self::$compiled) >= self::COMPILED_CACHE_LIMIT) {
+            self::$compiled = array_slice(self::$compiled, $keepFrom, null, true);
+        }
+
+        if (count(self::$typeCache) >= self::COMPILED_CACHE_LIMIT) {
+            self::$typeCache = array_slice(self::$typeCache, $keepFrom, null, true);
+        }
+    }
+
+    /**
      * 获取缓存统计信息
      *
      * @return array{hits: int, misses: int, hitRate: float} 缓存统计
@@ -472,6 +500,8 @@ class Query
      */
     public static function detectSelectorType(string $selector): string
     {
+        self::trimCompiledCache();
+
         // 检查缓存
         $cacheKey = md5($selector);
         if (isset(self::$typeCache[$cacheKey])) {
